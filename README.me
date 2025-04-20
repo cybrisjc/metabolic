@@ -1,0 +1,123 @@
+# Long COVID Symptom Journal
+
+## Overview
+
+The Long COVID Symptom Journal is a web application built with React and Tailwind CSS to help users track and manage Long COVID symptoms. It supports three user roles: regular users (patients), physicians, and admins. Patients can log symptoms, view their history, and gain insights into patterns. Physicians can view assigned patients' symptom data, and admins can manage users and symptoms.
+
+## Features
+
+- **User Roles**:
+  - **Patients**: Log daily symptoms (e.g., fatigue, brain fog) on a 1-10 scale, view symptom history via charts, and see insights/patterns.
+  - **Physicians**: View symptom history for assigned patients.
+  - **Admins**: Add, update, or remove users, manage symptom categories, and view user symptom data.
+- **Symptom Tracking**: Includes default symptoms like fatigue, brain fog, and heart palpitations, with the ability for admins to add or modify symptoms.
+- **Insights & Patterns**: Detects patterns (e.g., symptom improvement, correlations) based on logged data.
+- **Security**:
+  - Passwords are hashed using SHA-256.
+  - Data is encrypted using AES-GCM and stored in `localStorage`.
+  - Session management with JWT-like tokens (stored in `sessionStorage`).
+- **Responsive Design**: Built with Tailwind CSS for a mobile-friendly UI.
+
+## Tech Stack
+
+- **Frontend**: React (v18.2.0), Tailwind CSS
+- **Libraries**:
+  - Chart.js (v4.4.0) for symptom history charts
+  - Babel (v7.22.5) for JSX transpilation
+- **Hosting**: Deployed on GitHub Pages
+
+## Prerequisites
+
+- A GitHub account (repository must be public for GitHub Pages).
+- A modern web browser (e.g., Chrome, Firefox) to run the app.
+- Basic knowledge of Git for deployment.
+
+## Setup and Deployment on GitHub Pages
+
+### 1. Clone the Repository
+
+Clone this repository to your local machine:
+
+```bash
+git clone https://github.com/<your-username>/<repository-name>.git
+cd <repository-name>
+```
+
+### 2. Add the Website File
+
+Ensure the `index.html` file (provided in the repository) is in the root directory. This file contains the entire app, including React components, Tailwind CSS, and Chart.js.
+
+### 3. Deploy to GitHub Pages
+
+1. **Push Changes**: Commit and push the `index.html` file to your repository:
+
+   ```bash
+   git add index.html
+   git commit -m "Deploy Long COVID Symptom Journal"
+   git push origin main
+   ```
+2. **Enable GitHub Pages**:
+   - Go to your repository on GitHub.
+   - Navigate to **Settings** &gt; **Pages**.
+   - Under "Build and deployment," set the source to "Deploy from a branch."
+   - Select the `main` branch and the root folder (`/`).
+   - Click **Save**.
+3. **Access Your Site**:
+   - GitHub Pages will provide a URL like `https://<your-username>.github.io` (for a user site) or `https://<your-username>.github.io/<repository-name>` (for a project site).
+   - It may take a few minutes for the site to be live.
+
+### 4. (Optional) Link a Custom Domain
+
+1. In the GitHub Pages settings, under "Custom domain," enter your domain (e.g., `example.com`) and click **Save**.
+2. Configure DNS settings with your domain registrar:
+   - For an apex domain (`example.com`): Add four A records pointing to GitHub’s IP addresses:
+
+     ```
+     185.199.108.153
+     185.199.109.153
+     185.199.110.153
+     185.199.111.153
+     ```
+   - For a subdomain (`www.example.com`): Add a CNAME record pointing to `<your-username>.github.io.`.
+3. (Optional) Enable HTTPS by checking "Enforce HTTPS" in GitHub Pages settings.
+
+## Usage
+
+1. **Access the App**: Open the GitHub Pages URL (or your custom domain) in a browser.
+2. **Login**:
+   - **Admin**: Username: `admin`, Password: `admin123`
+   - **Physician**: Username: `drjones`, Password: `doctor123` (example user)
+   - **Patient**: Username: `sarahb`, Password: `sarah123` (example user)
+3. **Functionality**:
+   - **Patients**: Log symptoms via sliders, select a date, and save. View history and insights.
+   - **Physicians**: View assigned patients’ symptom history.
+   - **Admins**: Manage users (add, update, remove) and symptoms (add, update, delete). View any user’s symptom history.
+
+## Security Notes
+
+- **Sensitive Data**: The app currently stores passwords in a hashed format within `index.html` and uses `localStorage` for data persistence. For production use, consider:
+  - Removing hardcoded user data and implementing a proper backend for authentication.
+  - Using a secure database instead of `localStorage`.
+- **Public Repository**: GitHub Pages requires a public repository for the free tier. Ensure sensitive data is removed or obscured before deployment.
+
+## Limitations
+
+- **Static App**: This is a static React app with no backend. Data persists in the browser’s `localStorage`.
+- **Scalability**: Designed for a small user base (up to 20 clients). For larger audiences, consider a backend solution.
+- **GitHub Pages Limits**: 1GB storage, 100GB/month bandwidth, suitable for small-scale use.
+
+## Contributing
+
+1. Fork the repository.
+2. Create a new branch (`git checkout -b feature/your-feature`).
+3. Make changes and commit (`git commit -m "Add your feature"`).
+4. Push to your branch (`git push origin feature/your-feature`).
+5. Create a pull request.
+
+## License
+
+This project is licensed under the MIT License. See the LICENSE file for details.
+
+## Contact
+
+For questions or support, open an issue in this repository.
