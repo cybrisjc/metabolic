@@ -1,0 +1,17 @@
+{
+  "name": "long-covid-symptom-journal",
+  "version": "1.0.0",
+  "description": "Long COVID Symptom Journal with secure Firebase configuration",
+  "main": "index.js",
+  "scripts": {
+    "build": "node build.js",
+    "serve": "firebase serve",
+    "deploy": "npm run build && firebase deploy"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "firebase-tools": "^12.9.1"
+  }
+}
