@@ -16,7 +16,7 @@ The Long COVID Symptom Journal is a web application built with React and Tailwin
 ### 1. Prerequisites
 
 - Node.js (v18 or higher)
-- Firebase CLI (`npm install -g firebase-tools`)
+- Firebase CLI (installation instructions below)
 - A Firebase project
 
 ### 2. Initial Setup
@@ -27,7 +27,26 @@ The Long COVID Symptom Journal is a web application built with React and Tailwin
    cd long-covid-symptom-journal
    ```
 
-2. **Install dependencies**:
+2. **Configure npm for global packages** (to avoid permission errors):
+   ```bash
+   npm config set prefix '~/.npm-global'
+   export PATH=~/.npm-global/bin:$PATH
+   ```
+   
+   Add the export line to your shell profile file:
+   ```bash
+   echo 'export PATH=~/.npm-global/bin:$PATH' >> ~/.bashrc
+   source ~/.bashrc
+   ```
+   
+   *Note: Replace `~/.bashrc` with `~/.zshrc` if you're using zsh shell*
+
+3. **Install Firebase CLI**:
+   ```bash
+   npm install -g firebase-tools
+   ```
+
+4. **Install project dependencies**:
    ```bash
    npm install
    cd functions
@@ -35,7 +54,7 @@ The Long COVID Symptom Journal is a web application built with React and Tailwin
    cd ..
    ```
 
-3. **Firebase Setup**:
+5. **Firebase Setup**:
    ```bash
    firebase login
    firebase use --add  # Select your Firebase project
