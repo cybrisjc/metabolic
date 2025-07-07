@@ -1,43 +1,4 @@
-<script type="text/javascript">
-        var gk_isXlsx = false;
-        var gk_xlsxFileLookup = {};
-        var gk_fileData = {};
-        function filledCell(cell) {
-          return cell !== '' && cell != null;
-        }
-        function loadFileData(filename) {
-        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
-            try {
-                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
-                var firstSheetName = workbook.SheetNames[0];
-                var worksheet = workbook.Sheets[firstSheetName];
-
-                // Convert sheet to JSON to filter blank rows
-                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
-                // Filter out blank rows (rows where all cells are empty, null, or undefined)
-                var filteredData = jsonData.filter(row => row.some(filledCell));
-
-                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
-                var headerRowIndex = filteredData.findIndex((row, index) =>
-                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
-                );
-                // Fallback
-                if (headerRowIndex === -1 || headerRowIndex > 25) {
-                  headerRowIndex = 0;
-                }
-
-                // Convert filtered JSON back to CSV
-                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
-                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
-                return csv;
-            } catch (e) {
-                console.error(e);
-                return "";
-            }
-        }
-        return gk_fileData[filename] || "";
-        }
-        </script><!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -48,12 +9,29 @@
     <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"></script>
 </head>
 <body>
     <div id="root" className="min-h-screen bg-gray-100 p-4"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
+
+        // Initialize Firebase with your config (replace with your actual Firebase config)
+        const firebaseConfig = {
+            apiKey: "your-actual-api-key",
+            authDomain: "your-project-id.firebaseapp.com",
+            projectId: "your-project-id",
+            storageBucket: "your-project-id.appspot.com",
+            messagingSenderId: "your-messaging-sender-id",
+            appId: "your-app-id"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const auth = firebase.auth();
 
         // Utility Functions for Security
         const hashPassword = async (password) => {
@@ -511,8 +489,24 @@
                         alert("Invalid physician selection.");
                         return;
                     }
-                    setUsersData([...usersData, { ...newUser, username: sanitizedUsername, name: sanitizedName, lastName: sanitizedLastName, password: hashedPassword, id: usersData.length + 1 }]);
+                    const newUserData = {
+                        username: sanitizedUsername,
+                        name: sanitizedName,
+                        lastName: sanitizedLastName,
+                        password: hashedPassword,
+                        isPhysician: newUser.isPhysician,
+                        physicianId: newUser.physicianId
+                    };
+                    const docRef = await db.collection("users").add(newUserData);
+                    setUsersData([...usersData, { id: docRef.id, ...newUserData }]);
                     setNewUser({ username: "", name: "", lastName: "", password: "", isPhysician: false, physicianId: null });
+
+                    // Add user to Firebase Authentication
+                    try {
+                        await auth.createUserWithEmailAndPassword(`${sanitizedUsername}@example.com`, sanitizedPassword);
+                    } catch (error) {
+                        console.error("Failed to add user to Firebase Auth:", error);
+                    }
                 }
             };
 
@@ -536,24 +530,32 @@
                         alert("This patient is already assigned to another physician.");
                         return;
                     }
-                    setUsersData(usersData.map(user => 
-                        user.id === updateUser.id ? { ...user, name: sanitizedName, lastName: sanitizedLastName, password: hashedPassword, isPhysician: updateUser.isPhysician, physicianId: updateUser.physicianId } : user
+                    const updatedUserData = {
+                        name: sanitizedName,
+                        lastName: sanitizedLastName,
+                        password: hashedPassword,
+                        isPhysician: updateUser.isPhysician,
+                        physicianId: updateUser.physicianId
+                    };
+                    await db.collection("users").doc(updateUser.id).update(updatedUserData);
+                    setUsersData(usersData.map(user =>
+                        user.id === updateUser.id ? { ...user, ...updatedUserData } : user
                     ));
                     setUpdateUser(null);
+
+                    // Update Firebase Authentication password if changed
+                    try {
+                        const authUser = auth.currentUser;
+                        if (authUser && authUser.email === `${updateUser.username}@example.com`) {
+                            await authUser.updatePassword(sanitizedPassword);
+                        }
+                    } catch (error) {
+                        console.error("Failed to update user password in Firebase Auth:", error);
+                    }
                 }
             };
 
-            const handleRemoveUser = (userId) => {
-                const userToRemove = usersData.find(user => user.id === userId);
-                if (!userToRemove) {
-                    alert("Error: User not found. They may have already been removed.");
-                    return;
-                }
-                setUserToRemoveId(userId);
-                setShowConfirmDialog(true);
-            };
-
-            const confirmRemoveUser = () => {
+            const confirmRemoveUser = async () => {
                 const userId = userToRemoveId;
                 const userToRemove = usersData.find(user => user.id === userId);
                 if (!userToRemove) {
@@ -567,12 +569,30 @@
                 setLastRemovedSymptoms(userSymptomsToRemove);
                 setShowUndo(true);
 
+                // Delete user from Firestore
+                await db.collection("users").doc(userId).delete();
+                // Delete associated symptoms
+                const symptomsToDelete = userSymptoms.filter(entry => entry.userId === userId);
+                for (const symptomEntry of symptomsToDelete) {
+                    await db.collection("userSymptoms").doc(symptomEntry.id).delete();
+                }
+
                 setUsersData(usersData.filter(user => user.id !== userId));
                 setUserSymptoms(userSymptoms.filter(entry => entry.userId !== userId));
                 setSelectedUser(null);
 
                 setShowConfirmDialog(false);
                 setUserToRemoveId(null);
+
+                // Delete user from Firebase Authentication
+                try {
+                    const authUser = auth.currentUser;
+                    if (authUser && authUser.email === `${userToRemove.username}@example.com`) {
+                        await authUser.delete();
+                    }
+                } catch (error) {
+                    console.error("Failed to delete user from Firebase Auth:", error);
+                }
             };
 
             const cancelRemoveUser = () => {
@@ -946,17 +966,10 @@
         };
 
         const App = () => {
-            const initialUsers = [
-                { id: 1, username: "johnsmith", name: "John", lastName: "Smith", password: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8", physicianId: null },
-                { id: 2, username: "taniar", name: "Tania", lastName: "Rodriguez", password: "e1f0e2f1f2f3f4f5f6f7f8f9fa0fb0fc0fd0fe0ff0f1f2f3f4f5f6f7f8f9fa0fb", physicianId: null },
-                { id: 3, username: "drjones", name: "Emily", lastName: "Jones", password: "d8e8fca2dc0f896fd7cb4cb0031ba249f9a123456789abcdef0123456789abc", isPhysician: true, physicianId: null },
-                { id: 4, username: "sarahb", name: "Sarah", lastName: "Brown", password: "c1a5298f939f1f1a47e8b9d9d9a1d9f9a123456789abcdef0123456789abcde", isPhysician: false, physicianId: 3 }
-            ];
-
             const [user, setUser] = useState(null);
             const [isAdminLogin, setIsAdminLogin] = useState(false);
             const [isPhysicianLogin, setIsPhysicianLogin] = useState(false);
-            const [usersData, setUsersData] = useState(() => initialUsers);
+            const [usersData, setUsersData] = useState([]);
             const [symptomsList, setSymptomsList] = useState([
                 "Fatigue",
                 "Brain Fog",
@@ -968,86 +981,7 @@
                 "Muscle Aches",
                 "Metabolism"
             ]);
-            const [userSymptoms, setUserSymptoms] = useState(() => {
-                const taniaSymptoms = [
-                    {
-                        userId: 2,
-                        date: "2024-08-26",
-                        symptoms: {
-                            "Brain Fog": 6,
-                            "Headache": 8,
-                            "Sleep Problems": 8,
-                            "Fatigue": 8,
-                            "Metabolism": 10,
-                            "Heart Palpitations": 5,
-                            "Joint Pain": 7,
-                            "Rashes": 4,
-                            "Muscle Aches": 7
-                        }
-                    },
-                    {
-                        userId: 2,
-                        date: "2024-10-23",
-                        symptoms: {
-                            "Brain Fog": 4,
-                            "Headache": 6,
-                            "Sleep Problems": 5,
-                            "Fatigue": 7,
-                            "Metabolism": 9,
-                            "Heart Palpitations": 3,
-                            "Joint Pain": 5,
-                            "Rashes": 1,
-                            "Muscle Aches": 5
-                        }
-                    },
-                    {
-                        userId: 2,
-                        date: "2024-11-30",
-                        symptoms: {
-                            "Brain Fog": 3,
-                            "Headache": 8,
-                            "Sleep Problems": 5,
-                            "Fatigue": 8,
-                            "Metabolism": 9,
-                            "Heart Palpitations": 2,
-                            "Joint Pain": 5,
-                            "Rashes": 1,
-                            "Muscle Aches": 6
-                        }
-                    },
-                    {
-                        userId: 2,
-                        date: "2024-12-20",
-                        symptoms: {
-                            "Brain Fog": 2,
-                            "Headache": 2,
-                            "Sleep Problems": 3,
-                            "Fatigue": 6,
-                            "Metabolism": 9,
-                            "Heart Palpitations": 2,
-                            "Joint Pain": 4,
-                            "Rashes": 0,
-                            "Muscle Aches": 5
-                        }
-                    },
-                    {
-                        userId: 2,
-                        date: "2025-01-30",
-                        symptoms: {
-                            "Brain Fog": 2,
-                            "Headache": 4,
-                            "Sleep Problems": 2,
-                            "Fatigue": 6,
-                            "Metabolism": 9,
-                            "Heart Palpitations": 1,
-                            "Joint Pain": 3,
-                            "Rashes": 0,
-                            "Muscle Aches": 4
-                        }
-                    }
-                ];
-                return taniaSymptoms;
-            });
+            const [userSymptoms, setUserSymptoms] = useState([]);
             const [symptoms, setSymptoms] = useState(() => {
                 const initialSymptoms = {};
                 symptomsList.forEach(symptom => {
@@ -1057,153 +991,25 @@
             });
             const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-            const encryptionKey = "long-covid-secret-key-2025-12345";
-
+            // Load data from Firestore on mount
             useEffect(() => {
-                const loadEncryptedUsersData = async () => {
-                    const saved = localStorage.getItem('usersData');
-                    if (saved) {
-                        try {
-                            const encrypted = JSON.parse(saved);
-                            const decrypted = await decryptData(encrypted, encryptionKey);
-                            const hasSarahb = decrypted.some(user => user.username === "sarahb" && user.id === 4);
-                            if (!hasSarahb) {
-                                setUsersData(initialUsers);
-                                localStorage.removeItem('usersData');
-                            } else {
-                                setUsersData(decrypted);
-                            }
-                        } catch (e) {
-                            console.error("Failed to decrypt usersData:", e);
-                            setUsersData(initialUsers);
-                            localStorage.removeItem('usersData');
-                        }
-                    } else {
-                        setUsersData(initialUsers);
-                    }
+                const loadUsersData = async () => {
+                    const snapshot = await db.collection("users").get();
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setUsersData(data);
                 };
-                loadEncryptedUsersData();
+
+                const loadUserSymptoms = async () => {
+                    const snapshot = await db.collection("userSymptoms").get();
+                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    setUserSymptoms(data);
+                };
+
+                loadUsersData();
+                loadUserSymptoms();
             }, []);
 
-            useEffect(() => {
-                const encryptAndSaveUsersData = async () => {
-                    try {
-                        const encrypted = await encryptData(usersData, encryptionKey);
-                        localStorage.setItem('usersData', JSON.stringify(encrypted));
-                    } catch (e) {
-                        console.error("Failed to encrypt usersData:", e);
-                    }
-                };
-                encryptAndSaveUsersData();
-            }, [usersData]);
-
-            useEffect(() => {
-                const encryptAndSave = async () => {
-                    try {
-                        const encrypted = await encryptData(userSymptoms, encryptionKey);
-                        localStorage.setItem('userSymptoms', JSON.stringify(encrypted));
-                    } catch (e) {
-                        console.error("Failed to encrypt userSymptoms:", e);
-                    }
-                };
-                encryptAndSave();
-            }, [userSymptoms]);
-
-            useEffect(() => {
-                const loadEncryptedData = async () => {
-                    const saved = localStorage.getItem('userSymptoms');
-                    if (saved) {
-                        try {
-                            const encrypted = JSON.parse(saved);
-                            const decrypted = await decryptData(encrypted, encryptionKey);
-                            setUserSymptoms(decrypted);
-                        } catch (e) {
-                            console.error("Failed to decrypt userSymptoms:", e);
-                            const taniaSymptoms = [
-                                {
-                                    userId: 2,
-                                    date: "2024-08-26",
-                                    symptoms: {
-                                        "Brain Fog": 6,
-                                        "Headache": 8,
-                                        "Sleep Problems": 8,
-                                        "Fatigue": 8,
-                                        "Metabolism": 10,
-                                        "Heart Palpitations": 5,
-                                        "Joint Pain": 7,
-                                        "Rashes": 4,
-                                        "Muscle Aches": 7
-                                    }
-                                },
-                                {
-                                    userId: 2,
-                                    date: "2024-10-23",
-                                    symptoms: {
-                                        "Brain Fog": 4,
-                                        "Headache": 6,
-                                        "Sleep Problems": 5,
-                                        "Fatigue": 7,
-                                        "Metabolism": 9,
-                                        "Heart Palpitations": 3,
-                                        "Joint Pain": 5,
-                                        "Rashes": 1,
-                                        "Muscle Aches": 5
-                                    }
-                                },
-                                {
-                                    userId: 2,
-                                    date: "2024-11-30",
-                                    symptoms: {
-                                        "Brain Fog": 3,
-                                        "Headache": 8,
-                                        "Sleep Problems": 5,
-                                        "Fatigue": 8,
-                                        "Metabolism": 9,
-                                        "Heart Palpitations": 2,
-                                        "Joint Pain": 5,
-                                        "Rashes": 1,
-                                        "Muscle Aches": 6
-                                    }
-                                },
-                                {
-                                    userId: 2,
-                                    date: "2024-12-20",
-                                    symptoms: {
-                                        "Brain Fog": 2,
-                                        "Headache": 2,
-                                        "Sleep Problems": 3,
-                                        "Fatigue": 6,
-                                        "Metabolism": 9,
-                                        "Heart Palpitations": 2,
-                                        "Joint Pain": 4,
-                                        "Rashes": 0,
-                                        "Muscle Aches": 5
-                                    }
-                                },
-                                {
-                                    userId: 2,
-                                    date: "2025-01-30",
-                                    symptoms: {
-                                        "Brain Fog": 2,
-                                        "Headache": 4,
-                                        "Sleep Problems": 2,
-                                        "Fatigue": 6,
-                                        "Metabolism": 9,
-                                        "Heart Palpitations": 1,
-                                        "Joint Pain": 3,
-                                        "Rashes": 0,
-                                        "Muscle Aches": 4
-                                    }
-                                }
-                            ];
-                            setUserSymptoms(taniaSymptoms);
-                            localStorage.removeItem('userSymptoms');
-                        }
-                    }
-                };
-                loadEncryptedData();
-            }, []);
-
+            // Load session user
             useEffect(() => {
                 const token = sessionStorage.getItem('sessionToken');
                 if (token) {
@@ -1221,6 +1027,7 @@
                 }
             }, [usersData]);
 
+            // Update symptoms list when symptomsList changes
             useEffect(() => {
                 setSymptoms(prev => {
                     const updatedSymptoms = { ...prev };
@@ -1246,27 +1053,33 @@
                 setSelectedDate(e.target.value);
             };
 
-            const handleSave = () => {
+            const handleSave = async () => {
                 if (!user || !user.id) return;
 
-                const existingEntryIndex = userSymptoms.findIndex(
-                    entry => entry.date === selectedDate && entry.userId === user.id
-                );
                 const newEntry = {
                     userId: user.id,
                     date: selectedDate,
                     symptoms: { ...symptoms },
                 };
 
-                if (existingEntryIndex !== -1) {
-                    const updatedEntries = [...userSymptoms];
-                    updatedEntries[existingEntryIndex] = newEntry;
-                    setUserSymptoms(updatedEntries);
+                // Check for existing entry on the same date
+                const existingEntry = userSymptoms.find(
+                    entry => entry.date === selectedDate && entry.userId === user.id
+                );
+
+                if (existingEntry) {
+                    // Update existing entry in Firestore
+                    await db.collection("userSymptoms").doc(existingEntry.id).update(newEntry);
+                    setUserSymptoms(userSymptoms.map(entry =>
+                        entry.id === existingEntry.id ? { ...entry, ...newEntry } : entry
+                    ));
                 } else {
-                    const updatedEntries = [...userSymptoms, newEntry].sort((a, b) => new Date(a.date) - new Date(b.date));
-                    setUserSymptoms(updatedEntries);
+                    // Add new entry to Firestore
+                    const docRef = await db.collection("userSymptoms").add(newEntry);
+                    setUserSymptoms([...userSymptoms, { id: docRef.id, ...newEntry}].sort((a, b) => new Date(a.date) - new Date(b.date)));
                 }
 
+                // Reset form
                 setSymptoms(prev => {
                     const resetSymptoms = {};
                     symptomsList.forEach(symptom => {
