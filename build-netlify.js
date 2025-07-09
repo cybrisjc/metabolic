@@ -47,17 +47,34 @@ const configReplaced = htmlContent.replace(
   }`
 );
 
-// Step 2: Remove any existing Firebase variable declarations
-const variablesRemoved = configReplaced
-  .replace(/const\s+app\s*=\s*firebase\.initializeApp\(firebaseConfig\);?\s*/g, '')
-  .replace(/const\s+auth\s*=\s*firebase\.auth\(\);?\s*/g, '')
-  .replace(/const\s+db\s*=\s*firebase\.firestore\(\);?\s*/g, '')
-  .replace(/firebase\.initializeApp\(firebaseConfig\);?\s*/g, '');
+// Step 2: Remove ALL Firebase variable declarations more thoroughly
+let variablesRemoved = configReplaced;
 
-// Step 3: Add the new async Firebase initialization
+// Remove const declarations
+variablesRemoved = variablesRemoved.replace(/const\s+app\s*=\s*firebase\.initializeApp\([^)]*\);?\s*/g, '');
+variablesRemoved = variablesRemoved.replace(/const\s+auth\s*=\s*firebase\.auth\(\);?\s*/g, '');
+variablesRemoved = variablesRemoved.replace(/const\s+db\s*=\s*firebase\.firestore\(\);?\s*/g, '');
+
+// Remove let declarations
+variablesRemoved = variablesRemoved.replace(/let\s+app\s*=\s*firebase\.initializeApp\([^)]*\);?\s*/g, '');
+variablesRemoved = variablesRemoved.replace(/let\s+auth\s*=\s*firebase\.auth\(\);?\s*/g, '');
+variablesRemoved = variablesRemoved.replace(/let\s+db\s*=\s*firebase\.firestore\(\);?\s*/g, '');
+
+// Remove var declarations
+variablesRemoved = variablesRemoved.replace(/var\s+app\s*=\s*firebase\.initializeApp\([^)]*\);?\s*/g, '');
+variablesRemoved = variablesRemoved.replace(/var\s+auth\s*=\s*firebase\.auth\(\);?\s*/g, '');
+variablesRemoved = variablesRemoved.replace(/var\s+db\s*=\s*firebase\.firestore\(\);?\s*/g, '');
+
+// Remove standalone Firebase initialization calls
+variablesRemoved = variablesRemoved.replace(/firebase\.initializeApp\([^)]*\);?\s*/g, '');
+
+// Remove any remaining duplicate variable declarations that might be scattered
+variablesRemoved = variablesRemoved.replace(/^\s*(const|let|var)\s+(app|auth|db)\s*=.*?;?\s*$/gm, '');
+
+// Step 3: Add the new async Firebase initialization in the right place
 const finalContent = variablesRemoved.replace(
-  /(<script type="text\/babel">[\s\S]*?)(\/\/ Firebase config will be loaded dynamically)/,
-  `$1$2
+  /(\/\/ Firebase config will be loaded dynamically[\s\S]*?}\s*})/,
+  `$1
   
   // Firebase variables - will be initialized asynchronously
   let app = null;
