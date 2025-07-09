@@ -12,6 +12,10 @@ if (!fs.existsSync(distDir)) {
 const indexPath = path.join(__dirname, 'index.html');
 let htmlContent = fs.readFileSync(indexPath, 'utf8');
 
+// Read the Firebase helper script
+const helperPath = path.join(__dirname, 'firebase-ready-helper.js');
+const helperScript = fs.readFileSync(helperPath, 'utf8');
+
 // Step 1: Replace Firebase config object
 const configReplaced = htmlContent.replace(
   /const firebaseConfig = \{[\s\S]*?\};/,
@@ -106,15 +110,23 @@ const finalContent = variablesRemoved.replace(
       const initialized = await initializeFirebase();
       if (initialized) {
         console.log('Application initialized successfully');
-        // Trigger any app initialization that depends on Firebase
+        // Set a global flag that Firebase is ready
+        window.firebaseReady = true;
+        
+        // Dispatch a custom event to notify components that Firebase is ready
+        window.dispatchEvent(new CustomEvent('firebaseReady'));
+        
+        // Also trigger any callback if it exists
         if (typeof window.onFirebaseReady === 'function') {
           window.onFirebaseReady();
         }
       } else {
         console.warn('Firebase initialization failed, running in demo mode');
+        window.firebaseReady = false;
       }
     } catch (error) {
       console.error('Application initialization error:', error);
+      window.firebaseReady = false;
       // Show user-friendly error but don't break the app
       const errorDiv = document.createElement('div');
       errorDiv.innerHTML = \`
@@ -128,8 +140,44 @@ const finalContent = variablesRemoved.replace(
   });`
 );
 
+// Step 4: Inject the Firebase helper script before the main script
+const withHelper = finalContent.replace(
+  /(<script type="text\/babel">)/,
+  `<script>
+${helperScript}
+</script>
+$1`
+);
+
+// Step 5: Wrap Firebase-dependent operations to wait for initialization
+const withSafeOperations = withHelper.replace(
+  /(async function loadUserSymptoms\(\) \{)/g,
+  `$1
+    // Wait for Firebase to be ready before proceeding
+    const isReady = await waitForFirebase();
+    if (!isReady) {
+      console.error('Firebase not ready for loadUserSymptoms');
+      return;
+    }`
+).replace(
+  /(const handleAddUser = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();`
+).replace(
+  /(const handleUpdateUser = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();`
+).replace(
+  /(const handleDeleteUser = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();`
+);
+
 // Write the secure version to dist directory
-fs.writeFileSync(path.join(distDir, 'index.html'), finalContent);
+fs.writeFileSync(path.join(distDir, 'index.html'), withSafeOperations);
 
 console.log('✅ Netlify build completed successfully!');
 console.log('📁 Secure version created in dist/index.html');
