@@ -289,6 +289,146 @@ const withSafeOperations = withHelper.replace(
       if (!window.db) {
         throw new Error('Database not available');
       }`
+).replace(
+  // Fix authentication to use email/password instead of username/password
+  /(const handleLogin = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();
+      if (!window.auth) {
+        throw new Error('Authentication not available');
+      }
+      
+      // Convert username to email format for Firebase Auth
+      let email = username;
+      if (!username.includes('@')) {
+        // Map usernames to email addresses
+        const userEmailMap = {
+          'admin': 'admin@longcovidtracker.app',
+          'drjones': 'drjones@longcovidtracker.app',
+          'sarahb': 'sarahb@longcovidtracker.app'
+        };
+        email = userEmailMap[username] || username + '@longcovidtracker.app';
+      }`
+).replace(
+  // Update the login logic to use Firebase Auth
+  /(\/\/ Simulate authentication logic)/,
+  `// Use Firebase Authentication
+      try {
+        const userCredential = await window.auth.signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        // Get user role from Firestore
+        const userDoc = await window.db.collection('users').doc(user.uid).get();
+        let userData;
+        
+        if (userDoc.exists) {
+          userData = userDoc.data();
+        } else {
+          // Create default user data if doesn't exist
+          const defaultUserData = {
+            email: user.email,
+            username: username,
+            role: username === 'admin' ? 'admin' : (username === 'drjones' ? 'physician' : 'patient'),
+            createdAt: new Date().toISOString()
+          };
+          
+          await window.db.collection('users').doc(user.uid).set(defaultUserData);
+          userData = defaultUserData;
+        }
+        
+        // Set current user
+        setCurrentUser({
+          id: user.uid,
+          username: userData.username || username,
+          email: user.email,
+          role: userData.role
+        });
+        
+        setIsLoggedIn(true);
+        setLoginError('');
+        
+      } catch (authError) {
+        console.error('Authentication error:', authError);
+        
+        // If user doesn't exist, try to create them (for initial setup)
+        if (authError.code === 'auth/user-not-found') {
+          try {
+            const userCredential = await window.auth.createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            // Create user document in Firestore
+            const userData = {
+              email: user.email,
+              username: username,
+              role: username === 'admin' ? 'admin' : (username === 'drjones' ? 'physician' : 'patient'),
+              createdAt: new Date().toISOString()
+            };
+            
+            await window.db.collection('users').doc(user.uid).set(userData);
+            
+            setCurrentUser({
+              id: user.uid,
+              username: username,
+              email: user.email,
+              role: userData.role
+            });
+            
+            setIsLoggedIn(true);
+            setLoginError('');
+            
+          } catch (createError) {
+            console.error('User creation error:', createError);
+            setLoginError('Invalid credentials or account creation failed');
+          }
+        } else {
+          setLoginError('Invalid credentials');
+        }
+      }`
+).replace(
+  // Update logout to use Firebase Auth
+  /(const handleLogout = \(\) => \{)/,
+  `const handleLogout = async () => {
+    try {
+      if (window.auth) {
+        await window.auth.signOut();
+      }`
+).replace(
+  // Fix user management functions to work with Firebase Auth
+  /(const handleAddUser = async \([^)]*\) => \{[\s\S]*?try \{[\s\S]*?await waitForFirebase\(\);[\s\S]*?if \(!window\.db\) \{[\s\S]*?throw new Error\('Database not available'\);[\s\S]*?\})/,
+  `const handleAddUser = async (userData) => {
+    try {
+      await waitForFirebase();
+      if (!window.db || !window.auth) {
+        throw new Error('Firebase not available');
+      }
+      
+      // Create user in Firebase Auth
+      const email = userData.email || userData.username + '@longcovidtracker.app';
+      const userCredential = await window.auth.createUserWithEmailAndPassword(email, userData.password);
+      const user = userCredential.user;
+      
+      // Create user document in Firestore
+      const userDoc = {
+        username: userData.username,
+        email: email,
+        role: userData.role,
+        createdAt: new Date().toISOString()
+      };
+      
+      await window.db.collection('users').doc(user.uid).set(userDoc);
+      
+      // Update local users state
+      setUsers(prev => [...prev, { id: user.uid, ...userDoc }]);
+      
+      setShowAddUserModal(false);
+      setNewUser({ username: '', email: '', password: '', role: 'patient' });
+      
+    } catch (error) {
+      console.error('Error adding user:', error);
+      alert('Error adding user: ' + error.message);
+    }
+  };`
 );
 
 // Write the secure version to dist directory
