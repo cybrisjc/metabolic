@@ -149,13 +149,71 @@ ${helperScript}
 $1`
 );
 
-// Step 5: Wrap Firebase-dependent operations to wait for initialization
+// Step 5: Fix React rendering and Firebase initialization
 const withSafeOperations = withHelper.replace(
+  // Make sure Firebase variables are globally accessible
+  /(let app = null;\s*let auth = null;\s*let db = null;)/,
+  `$1
+  
+  // Make Firebase variables globally accessible
+  window.app = null;
+  window.auth = null;
+  window.db = null;`
+).replace(
+  // Update Firebase initialization to set global variables
+  /(app = firebase\.initializeApp\(firebaseConfig\);\s*auth = firebase\.auth\(\);\s*db = firebase\.firestore\(\);)/,
+  `app = firebase.initializeApp(firebaseConfig);
+        auth = firebase.auth();
+        db = firebase.firestore();
+        
+        // Set global variables
+        window.app = app;
+        window.auth = auth;
+        window.db = db;`
+).replace(
+  // Ensure React root renders after Firebase is ready
+  /(window\.dispatchEvent\(new CustomEvent\('firebaseReady'\)\);)/,
+  `$1
+        
+        // Trigger React rendering after Firebase is ready
+        if (typeof window.renderApp === 'function') {
+          window.renderApp();
+        }`
+).replace(
+  // Add React rendering trigger
+  /(const root = ReactDOM\.createRoot\(document\.getElementById\('root'\)\);[\s\S]*?root\.render\(<App \/>\);)/,
+  `// Create root but don't render immediately
+  const root = ReactDOM.createRoot(document.getElementById('root'));
+  
+  // Function to render the app
+  window.renderApp = function() {
+    root.render(<App />);
+  };
+  
+  // Render immediately if Firebase is already ready, otherwise wait
+  if (window.firebaseReady) {
+    window.renderApp();
+  } else {
+    // Listen for Firebase ready event
+    window.addEventListener('firebaseReady', () => {
+      window.renderApp();
+    });
+    
+    // Fallback: render after 3 seconds even if Firebase isn't ready
+    setTimeout(() => {
+      if (!window.firebaseReady) {
+        console.warn('Rendering app without Firebase (demo mode)');
+        window.renderApp();
+      }
+    }, 3000);
+  }`
+).replace(
+  // Wrap Firebase-dependent operations
   /(async function loadUserSymptoms\(\) \{)/g,
   `$1
     // Wait for Firebase to be ready before proceeding
     const isReady = await waitForFirebase();
-    if (!isReady) {
+    if (!isReady || !window.db) {
       console.error('Firebase not ready for loadUserSymptoms');
       return;
     }`
@@ -163,17 +221,74 @@ const withSafeOperations = withHelper.replace(
   /(const handleAddUser = async \([^)]*\) => \{)/g,
   `$1
     try {
-      await waitForFirebase();`
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
 ).replace(
   /(const handleUpdateUser = async \([^)]*\) => \{)/g,
   `$1
     try {
-      await waitForFirebase();`
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
 ).replace(
   /(const handleDeleteUser = async \([^)]*\) => \{)/g,
   `$1
     try {
-      await waitForFirebase();`
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
+).replace(
+  /(const handleAddSymptom = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
+).replace(
+  /(const handleUpdateSymptom = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
+).replace(
+  /(const handleDeleteSymptom = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
+).replace(
+  /(const saveSymptomEntry = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
+).replace(
+  /(const loadSymptomHistory = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
+).replace(
+  /(const loadPatientData = async \([^)]*\) => \{)/g,
+  `$1
+    try {
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }`
 );
 
 // Write the secure version to dist directory
