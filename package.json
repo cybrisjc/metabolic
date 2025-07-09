@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "build": "node build.js",
+    "build:netlify": "node build-netlify.js",
     "serve": "firebase serve",
     "deploy": "npm run build && firebase deploy"
   },
