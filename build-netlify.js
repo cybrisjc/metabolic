@@ -12,8 +12,8 @@ if (!fs.existsSync(distDir)) {
 const indexPath = path.join(__dirname, 'index.html');
 let htmlContent = fs.readFileSync(indexPath, 'utf8');
 
-// Create a secure version that fetches config from Netlify function
-const secureHtmlContent = htmlContent.replace(
+// Step 1: Replace Firebase config object
+const configReplaced = htmlContent.replace(
   /const firebaseConfig = \{[\s\S]*?\};/,
   `// Firebase config will be loaded dynamically
   let firebaseConfig = null;
@@ -47,10 +47,19 @@ const secureHtmlContent = htmlContent.replace(
   }`
 );
 
-// Update Firebase initialization to be async
-const updatedHtmlContent = secureHtmlContent.replace(
-  /firebase\.initializeApp\(firebaseConfig\);/,
-  `// Firebase will be initialized after config is loaded
+// Step 2: Remove any existing Firebase variable declarations
+const variablesRemoved = configReplaced
+  .replace(/const\s+app\s*=\s*firebase\.initializeApp\(firebaseConfig\);?\s*/g, '')
+  .replace(/const\s+auth\s*=\s*firebase\.auth\(\);?\s*/g, '')
+  .replace(/const\s+db\s*=\s*firebase\.firestore\(\);?\s*/g, '')
+  .replace(/firebase\.initializeApp\(firebaseConfig\);?\s*/g, '');
+
+// Step 3: Add the new async Firebase initialization
+const finalContent = variablesRemoved.replace(
+  /(<script type="text\/babel">[\s\S]*?)(\/\/ Firebase config will be loaded dynamically)/,
+  `$1$2
+  
+  // Firebase variables - will be initialized asynchronously
   let app = null;
   let auth = null;
   let db = null;
@@ -74,16 +83,18 @@ const updatedHtmlContent = secureHtmlContent.replace(
   
   // Call initialization when DOM is loaded
   document.addEventListener('DOMContentLoaded', async () => {
-    // Show loading message
     console.log('Initializing application...');
     
     try {
       const initialized = await initializeFirebase();
       if (initialized) {
         console.log('Application initialized successfully');
+        // Trigger any app initialization that depends on Firebase
+        if (typeof window.onFirebaseReady === 'function') {
+          window.onFirebaseReady();
+        }
       } else {
         console.warn('Firebase initialization failed, running in demo mode');
-        // Continue without Firebase for demo purposes
       }
     } catch (error) {
       console.error('Application initialization error:', error);
@@ -101,8 +112,9 @@ const updatedHtmlContent = secureHtmlContent.replace(
 );
 
 // Write the secure version to dist directory
-fs.writeFileSync(path.join(distDir, 'index.html'), updatedHtmlContent);
+fs.writeFileSync(path.join(distDir, 'index.html'), finalContent);
 
 console.log('✅ Netlify build completed successfully!');
 console.log('📁 Secure version created in dist/index.html');
 console.log('🔒 Firebase configuration will be loaded securely from Netlify function');
+console.log('🔧 Fixed duplicate variable declarations');
