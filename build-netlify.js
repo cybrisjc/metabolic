@@ -74,14 +74,25 @@ const updatedHtmlContent = secureHtmlContent.replace(
   
   // Call initialization when DOM is loaded
   document.addEventListener('DOMContentLoaded', async () => {
-    const initialized = await initializeFirebase();
-    if (!initialized) {
-      console.error('Firebase initialization failed');
-      // Show error message to user
+    // Show loading message
+    console.log('Initializing application...');
+    
+    try {
+      const initialized = await initializeFirebase();
+      if (initialized) {
+        console.log('Application initialized successfully');
+      } else {
+        console.warn('Firebase initialization failed, running in demo mode');
+        // Continue without Firebase for demo purposes
+      }
+    } catch (error) {
+      console.error('Application initialization error:', error);
+      // Show user-friendly error but don't break the app
       const errorDiv = document.createElement('div');
       errorDiv.innerHTML = \`
-        <div style="position: fixed; top: 20px; right: 20px; background: #fee; border: 1px solid #fcc; color: #c66; padding: 15px; border-radius: 5px; z-index: 1000;">
-          <strong>Configuration Error:</strong> Unable to load Firebase configuration. Please check your environment variables.
+        <div style="position: fixed; top: 20px; right: 20px; background: #fee; border: 1px solid #fcc; color: #c66; padding: 15px; border-radius: 5px; z-index: 1000; max-width: 300px;">
+          <strong>Notice:</strong> Running in demo mode. Some features may be limited.
+          <button onclick="this.parentElement.parentElement.remove()" style="float: right; background: none; border: none; color: #c66; cursor: pointer;">×</button>
         </div>
       \`;
       document.body.appendChild(errorDiv);
