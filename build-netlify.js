@@ -76,7 +76,7 @@ variablesRemoved = variablesRemoved.replace(/firebase\.initializeApp\([^)]*\);?\
 variablesRemoved = variablesRemoved.replace(/^\s*(const|let|var)\s+(app|auth|db)\s*=.*?;?\s*$/gm, '');
 
 // Step 3: Add the new async Firebase initialization in the right place
-const finalContent = loginInterfaceReplaced.replace(
+const finalContent = variablesRemoved.replace(
   /(\/\/ Firebase config will be loaded dynamically[\s\S]*?}\s*})/,
   `$1
   
