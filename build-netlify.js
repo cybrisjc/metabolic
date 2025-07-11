@@ -476,6 +476,49 @@ const withSafeOperations = withHelper.replace(
       alert('Error adding user: ' + error.message);
     }
   };`
+).replace(
+  // Update user management modal to use name instead of username
+  /(Add User Modal[\s\S]*?<input[\s\S]*?value=\{newUser\.username\}[\s\S]*?onChange=\{[^}]*setNewUser[^}]*username[^}]*\})/,
+  `Add User Modal
+            <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+              <div className="bg-white p-6 rounded-lg w-96">
+                <h3 className="text-lg font-semibold mb-4">Add New User</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Name</label>
+                    <input
+                      type="text"
+                      value={newUser.name}
+                      onChange={(e) => setNewUser({...newUser, name: e.target.value})}`
+).replace(
+  // Update user state initialization
+  /(const \[newUser, setNewUser\] = React\.useState\(\{[\s\S]*?\}\);)/,
+  `const [newUser, setNewUser] = React.useState({
+    name: '',
+    email: '',
+    role: 'patient'
+  });`
+).replace(
+  // Update users loading to get all users from Firestore
+  /(const loadUsers = async \(\) => \{)/,
+  `const loadUsers = async () => {
+    try {
+      await waitForFirebase();
+      if (!window.db) {
+        throw new Error('Database not available');
+      }
+      
+      const usersSnapshot = await window.db.collection('users').get();
+      const usersData = usersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      
+      setUsers(usersData);
+    } catch (error) {
+      console.error('Error loading users:', error);
+    }
+  };`
 );
 
 // Write the secure version to dist directory
