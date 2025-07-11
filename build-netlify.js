@@ -309,24 +309,53 @@ const withSafeOperations = withHelper.replace(
 ).replace(
   // Fix authentication to use email/password instead of username/password
   /(const handleLogin = async \([^)]*\) => \{)/g,
-  `$1
+  `const handleLogin = async (email, password) => {
     try {
       await waitForFirebase();
       if (!window.auth) {
         throw new Error('Authentication not available');
       }
       
-      // Convert username to email format for Firebase Auth
-      let email = username;
-      if (!username.includes('@')) {
-        // Map usernames to email addresses
-        const userEmailMap = {
-          'admin': 'admin@longcovidtracker.app',
-          'drjones': 'drjones@longcovidtracker.app',
-          'sarahb': 'sarahb@longcovidtracker.app'
+      // Use Firebase Authentication with email/password
+      const userCredential = await window.auth.signInWithEmailAndPassword(email, password);
+      const user = userCredential.user;
+      
+      // Get user role from Firestore
+      const userDoc = await window.db.collection('users').doc(user.uid).get();
+      let userData;
+      
+      if (userDoc.exists) {
+        userData = userDoc.data();
+      } else {
+        // Create default user data if doesn't exist
+        const defaultUserData = {
+          email: user.email,
+          name: user.displayName || email.split('@')[0],
+          role: email === 'cybrisjc@gmail.com' ? 'admin' : 
+                (email === 'drjones@metaboliclongcovidconsulting.com' ? 'physician' : 'patient'),
+          createdAt: new Date().toISOString()
         };
-        email = userEmailMap[username] || username + '@longcovidtracker.app';
-      }`
+        
+        await window.db.collection('users').doc(user.uid).set(defaultUserData);
+        userData = defaultUserData;
+      }
+      
+      // Set current user
+      setCurrentUser({
+        id: user.uid,
+        name: userData.name,
+        email: user.email,
+        role: userData.role
+      });
+      
+      setIsLoggedIn(true);
+      setLoginError('');
+      
+    } catch (error) {
+      console.error('Authentication error:', error);
+      setLoginError('Invalid email or password');
+    }
+  };`
 ).replace(
   // Update the login logic to use Firebase Auth
   /(\/\/ Simulate authentication logic)/,
