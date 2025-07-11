@@ -76,7 +76,7 @@ variablesRemoved = variablesRemoved.replace(/firebase\.initializeApp\([^)]*\);?\
 variablesRemoved = variablesRemoved.replace(/^\s*(const|let|var)\s+(app|auth|db)\s*=.*?;?\s*$/gm, '');
 
 // Step 3: Add the new async Firebase initialization in the right place
-const finalContent = variablesRemoved.replace(
+const finalContent = loginInterfaceReplaced.replace(
   /(\/\/ Firebase config will be loaded dynamically[\s\S]*?}\s*})/,
   `$1
   
@@ -93,6 +93,12 @@ const finalContent = variablesRemoved.replace(
         app = firebase.initializeApp(firebaseConfig);
         auth = firebase.auth();
         db = firebase.firestore();
+        
+        // Enable Google Auth provider
+        const provider = new firebase.auth.GoogleAuthProvider();
+        provider.addScope('email');
+        provider.addScope('profile');
+        
         console.log('Firebase initialized successfully');
         return true;
       }
@@ -394,35 +400,76 @@ const withSafeOperations = withHelper.replace(
         await window.auth.signOut();
       }`
 ).replace(
-  // Fix user management functions to work with Firebase Auth
-  /(const handleAddUser = async \([^)]*\) => \{[\s\S]*?try \{[\s\S]*?await waitForFirebase\(\);[\s\S]*?if \(!window\.db\) \{[\s\S]*?throw new Error\('Database not available'\);[\s\S]*?\})/,
+  // Update the main App component to use the new login
+  /(const App = \(\) => \{[\s\S]*?if \(!isLoggedIn\) \{[\s\S]*?return[\s\S]*?\})/,
+  `const App = () => {
+    const [isLoggedIn, setIsLoggedIn] = React.useState(false);
+    const [currentUser, setCurrentUser] = React.useState(null);
+
+    React.useEffect(() => {
+      const checkAuthState = async () => {
+        await waitForFirebase();
+        if (window.auth) {
+          window.auth.onAuthStateChanged(async (user) => {
+            if (user) {
+              // Get user data from Firestore
+              try {
+                const userDoc = await window.db.collection('users').doc(user.uid).get();
+                if (userDoc.exists) {
+                  const userData = userDoc.data();
+                  setCurrentUser({
+                    id: user.uid,
+                    name: userData.name,
+                    email: user.email,
+                    role: userData.role,
+                    photoURL: userData.photoURL
+                  });
+                  setIsLoggedIn(true);
+                }
+              } catch (error) {
+                console.error('Error fetching user data:', error);
+              }
+            } else {
+              setCurrentUser(null);
+              setIsLoggedIn(false);
+            }
+          });
+        }
+      };
+      
+      checkAuthState();
+    }, []);
+
+    if (!isLoggedIn) {
+      return <LoginForm setIsLoggedIn={setIsLoggedIn} setCurrentUser={setCurrentUser} />;
+    }`
+).replace(
+  // Update user management functions to work with Firebase Auth and proper user data structure
+  /(const handleAddUser = async \([^)]*\) => \{)/,
   `const handleAddUser = async (userData) => {
     try {
       await waitForFirebase();
-      if (!window.db || !window.auth) {
+      if (!window.db) {
         throw new Error('Firebase not available');
       }
       
-      // Create user in Firebase Auth
-      const email = userData.email || userData.username + '@longcovidtracker.app';
-      const userCredential = await window.auth.createUserWithEmailAndPassword(email, userData.password);
-      const user = userCredential.user;
-      
-      // Create user document in Firestore
+      // Create user document in Firestore (for admin management)
       const userDoc = {
-        username: userData.username,
-        email: email,
+        name: userData.name,
+        email: userData.email,
         role: userData.role,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
+        isManaged: true // Flag to indicate this user was created by admin
       };
       
-      await window.db.collection('users').doc(user.uid).set(userDoc);
+      // Generate a document ID for the user
+      const docRef = await window.db.collection('users').add(userDoc);
       
       // Update local users state
-      setUsers(prev => [...prev, { id: user.uid, ...userDoc }]);
+      setUsers(prev => [...prev, { id: docRef.id, ...userDoc }]);
       
       setShowAddUserModal(false);
-      setNewUser({ username: '', email: '', password: '', role: 'patient' });
+      setNewUser({ name: '', email: '', role: 'patient' });
       
     } catch (error) {
       console.error('Error adding user:', error);
