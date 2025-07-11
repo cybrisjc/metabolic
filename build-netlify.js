@@ -528,3 +528,8 @@ console.log('✅ Netlify build completed successfully!');
 console.log('📁 Secure version created in dist/index.html');
 console.log('🔒 Firebase configuration will be loaded securely from Netlify function');
 console.log('🔧 Fixed duplicate variable declarations');
+console.log('');
+console.log('## Demo Accounts (Email/Password):');
+console.log('- **Admin**: admin@longcovidtracker.app / admin123');
+console.log('- **Physician**: drjones@longcovidtracker.app / doctor123');
+console.log('- **Patient**: sarahb@longcovidtracker.app / sarah123');
