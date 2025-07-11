@@ -327,6 +327,135 @@ const withSafeOperations = withHelper.replace(
         email = userEmailMap[username] || username + '@longcovidtracker.app';
       }`
 ).replace(
+  // Update the login logic to use Firebase Auth
+  /(\/\/ Simulate authentication logic)/,
+  `// Use Firebase Authentication
+      try {
+        const userCredential = await window.auth.signInWithEmailAndPassword(email, password);
+        const user = userCredential.user;
+        
+        // Get user role from Firestore
+        const userDoc = await window.db.collection('users').doc(user.uid).get();
+        let userData;
+        
+        if (userDoc.exists) {
+          userData = userDoc.data();
+        } else {
+          // Create default user data if doesn't exist
+          const defaultUserData = {
+            email: user.email,
+            username: username,
+            role: username === 'admin' ? 'admin' : (username === 'drjones' ? 'physician' : 'patient'),
+            createdAt: new Date().toISOString()
+          };
+          
+          await window.db.collection('users').doc(user.uid).set(defaultUserData);
+          userData = defaultUserData;
+        }
+        
+        // Set current user
+        setCurrentUser({
+          id: user.uid,
+          username: userData.username || username,
+          email: user.email,
+          role: userData.role
+        });
+        
+        setIsLoggedIn(true);
+        setLoginError('');
+        
+      } catch (authError) {
+        console.error('Authentication error:', authError);
+        
+        // If user doesn't exist, try to create them (for initial setup)
+        if (authError.code === 'auth/user-not-found') {
+          try {
+            const userCredential = await window.auth.createUserWithEmailAndPassword(email, password);
+            const user = userCredential.user;
+            
+            // Create user document in Firestore
+            const userData = {
+              email: user.email,
+              username: username,
+              role: username === 'admin' ? 'admin' : (username === 'drjones' ? 'physician' : 'patient'),
+              createdAt: new Date().toISOString()
+            };
+            
+            await window.db.collection('users').doc(user.uid).set(userData);
+            
+            setCurrentUser({
+              id: user.uid,
+              username: username,
+              email: user.email,
+              role: userData.role
+            });
+            
+            setIsLoggedIn(true);
+            setLoginError('');
+            
+          } catch (createError) {
+            console.error('User creation error:', createError);
+            setLoginError('Invalid credentials or account creation failed');
+          }
+        } else {
+          setLoginError('Invalid credentials');
+        }
+      }`
+).replace(
+  // Add Google Sign-In functionality
+  /(const handleLogin = async \(email, password\) => \{[\s\S]*?\};)/,
+  `$1
+  
+  const handleGoogleLogin = async () => {
+    try {
+      await waitForFirebase();
+      if (!window.auth) {
+        throw new Error('Authentication not available');
+      }
+      
+      const provider = new firebase.auth.GoogleAuthProvider();
+      provider.addScope('email');
+      provider.addScope('profile');
+      
+      const result = await window.auth.signInWithPopup(provider);
+      const user = result.user;
+      
+      // Check if user exists in Firestore
+      const userDoc = await window.db.collection('users').doc(user.uid).get();
+      let userData;
+      
+      if (userDoc.exists) {
+        userData = userDoc.data();
+      } else {
+        // Create new user document
+        userData = {
+          email: user.email,
+          name: user.displayName,
+          role: 'patient', // Default role for Google sign-in users
+          photoURL: user.photoURL,
+          createdAt: new Date().toISOString()
+        };
+        
+        await window.db.collection('users').doc(user.uid).set(userData);
+      }
+      
+      setCurrentUser({
+        id: user.uid,
+        name: userData.name,
+        email: user.email,
+        role: userData.role,
+        photoURL: userData.photoURL
+      });
+      
+      setIsLoggedIn(true);
+      setLoginError('');
+      
+    } catch (error) {
+      console.error('Google authentication error:', error);
+      setLoginError('Google sign-in failed');
+    }
+  };`
+).replace(
   // Update logout to use Firebase Auth
   /(const handleLogout = \(\) => \{)/,
   `const handleLogout = async () => {
