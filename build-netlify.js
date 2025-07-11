@@ -12,12 +12,22 @@ if (!fs.existsSync(distDir)) {
 const indexPath = path.join(__dirname, 'index.html');
 let htmlContent = fs.readFileSync(indexPath, 'utf8');
 
+// Step 1: Fix Firebase CDN imports - use the compat versions for browser compatibility
+const firebaseImportsFixed = htmlContent.replace(
+  /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/[^"]*\/firebase-app\.js"><\/script>/g,
+  '<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>'
+).replace(
+  /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/[^"]*\/firebase-auth\.js"><\/script>/g,
+  '<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>'
+).replace(
+  /<script src="https:\/\/www\.gstatic\.com\/firebasejs\/[^"]*\/firebase-firestore\.js"><\/script>/g,
+  '<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>'
+);
+
 // Read the Firebase helper script
 const helperPath = path.join(__dirname, 'firebase-ready-helper.js');
 const helperScript = fs.readFileSync(helperPath, 'utf8');
 
-// Step 1: Replace Firebase config object
-const configReplaced = htmlContent.replace(
   /const firebaseConfig = \{[\s\S]*?\};/,
   `// Firebase config will be loaded dynamically
   let firebaseConfig = null;
