@@ -14,5 +14,8 @@
   },
   "devDependencies": {
     "firebase-tools": "^12.9.1"
-  }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
