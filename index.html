@@ -4,107 +4,79 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Long COVID Symptom Journal</title>
-    <script src="https://cdn.jsdelivr.net/npm/react@18.2.0/umd/react.development.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/react-dom@18.2.0/umd/react-dom.development.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.22.5/babel.min.js"></script>
+    <link rel="stylesheet" href="/dist/styles.css"> <!-- Local Tailwind CSS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
     <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js"></script>
 </head>
 <body>
-    <div id="root" className="min-h-screen bg-gray-100 p-4"></div>
+    <div id="root" class="min-h-screen bg-gray-100 p-4"></div>
 
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Initialize Firebase with your config (replace with your actual Firebase config)
-        const firebaseConfig = {
-            apiKey: "your-actual-api-key",
-            authDomain: "your-project-id.firebaseapp.com",
-            projectId: "your-project-id",
-            storageBucket: "your-project-id.appspot.com",
-            messagingSenderId: "your-messaging-sender-id",
-            appId: "your-app-id"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
-        const auth = firebase.auth();
+        // Dynamic Firebase config loading
+        let firebaseConfig = null;
+        let app = null;
+        let auth = null;
+        let db = null;
 
-        // Utility Functions for Security
-        const hashPassword = async (password) => {
-            const encoder = new TextEncoder();
-            const data = encoder.encode(password);
-            const hash = await crypto.subtle.digest('SHA-256', data);
-            return Array.from(new Uint8Array(hash))
-                .map(b => b.toString(16).padStart(2, '0'))
-                .join('');
-        };
-
-        const generateSessionToken = (user) => {
-            const header = btoa(JSON.stringify({ alg: "none" }));
-            const payload = btoa(JSON.stringify({ id: user.id, username: user.username, exp: Date.now() + 24 * 60 * 60 * 1000 }));
-            return `${header}.${payload}.`;
-        };
-
-        const verifySessionToken = (token) => {
+        async function loadFirebaseConfig() {
             try {
-                const [, payload] = token.split('.');
-                const decoded = JSON.parse(atob(payload));
-                if (decoded.exp < Date.now()) {
-                    return null;
+                const response = await fetch('/api/config');
+                if (!response.ok) throw new Error('Failed to load Firebase configuration');
+                firebaseConfig = await response.json();
+                return firebaseConfig;
+            } catch (error) {
+                console.error('Error loading Firebase config:', error);
+                if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                    firebaseConfig = {
+                        apiKey: process.env.FIREBASE_API_KEY || 'your-actual-api-key',
+                        authDomain: process.env.FIREBASE_AUTH_DOMAIN || 'your-project-id.firebaseapp.com',
+                        projectId: process.env.FIREBASE_PROJECT_ID || 'your-project-id',
+                        storageBucket: process.env.FIREBASE_STORAGE_BUCKET || 'your-project-id.appspot.com',
+                        messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID || 'your-messaging-sender-id',
+                        appId: process.env.FIREBASE_APP_ID || 'your-app-id'
+                    };
+                    return firebaseConfig;
                 }
-                return decoded;
-            } catch (e) {
-                return null;
+                throw error;
             }
-        };
+        }
 
-        const encryptData = async (data, key) => {
-            const encoder = new TextEncoder();
-            const encodedData = encoder.encode(JSON.stringify(data));
-            const iv = crypto.getRandomValues(new Uint8Array(12));
-            const derivedKey = await crypto.subtle.importKey(
-                "raw",
-                encoder.encode(key),
-                { name: "AES-GCM" },
-                false,
-                ["encrypt"]
-            );
-            const encrypted = await crypto.subtle.encrypt(
-                { name: "AES-GCM", iv },
-                derivedKey,
-                encodedData
-            );
-            return { iv: Array.from(iv), encrypted: Array.from(new Uint8Array(encrypted)) };
-        };
+        async function initializeFirebase() {
+            try {
+                await loadFirebaseConfig();
+                if (firebaseConfig) {
+                    app = firebase.initializeApp(firebaseConfig);
+                    auth = firebase.auth();
+                    db = firebase.firestore();
+                    window.firebaseReady = true;
+                    window.dispatchEvent(new CustomEvent('firebaseReady'));
+                    return true;
+                }
+            } catch (error) {
+                console.error('Failed to initialize Firebase:', error);
+                return false;
+            }
+        }
 
-        const decryptData = async (encryptedData, key) => {
-            const decoder = new TextDecoder();
-            const iv = new Uint8Array(encryptedData.iv);
-            const encrypted = new Uint8Array(encryptedData.encrypted);
-            const derivedKey = await crypto.subtle.importKey(
-                "raw",
-                new TextEncoder().encode(key),
-                { name: "AES-GCM" },
-                false,
-                ["decrypt"]
-            );
-            const decrypted = await crypto.subtle.decrypt(
-                { name: "AES-GCM", iv },
-                derivedKey,
-                encrypted
-            );
-            return JSON.parse(decoder.decode(decrypted));
-        };
+        document.addEventListener('DOMContentLoaded', async () => {
+            await initializeFirebase();
+        });
 
-        const sanitizeInput = (input) => {
-            const div = document.createElement('div');
-            div.textContent = input;
-            return div.innerHTML;
-        };
+        function waitForFirebase() {
+            return new Promise((resolve) => {
+                if (window.firebaseReady) return resolve(true);
+                window.addEventListener('firebaseReady', () => resolve(true));
+                setTimeout(() => resolve(window.firebaseReady), 3000);
+            });
+        }
 
         const SymptomSlider = ({ name, value, onChange }) => (
             <div className="mb-4">
@@ -134,7 +106,6 @@
                 if (chartInstanceRef.current) {
                     chartInstanceRef.current.destroy();
                 }
-
                 if (entries.length === 0) return;
 
                 const ctx = chartRef.current.getContext('2d');
@@ -149,30 +120,17 @@
 
                 chartInstanceRef.current = new Chart(ctx, {
                     type: 'line',
-                    data: {
-                        labels,
-                        datasets,
-                    },
+                    data: { labels, datasets },
                     options: {
                         responsive: true,
                         scales: {
-                            y: {
-                                min: 1,
-                                max: 10,
-                                title: { display: true, text: 'Severity (1-10)' },
-                            },
-                            x: {
-                                title: { display: true, text: 'Date' },
-                            },
+                            y: { min: 1, max: 10, title: { display: true, text: 'Severity (1-10)' } },
+                            x: { title: { display: true, text: 'Date' } },
                         },
                     },
                 });
 
-                return () => {
-                    if (chartInstanceRef.current) {
-                        chartInstanceRef.current.destroy();
-                    }
-                };
+                return () => chartInstanceRef.current?.destroy();
             }, [entries]);
 
             return <canvas ref={chartRef} className="w-full h-64"></canvas>;
@@ -180,69 +138,34 @@
 
         const InsightsSection = ({ entries, symptomsList }) => {
             const insights = [];
-
             for (let i = 0; i < entries.length - 1; i++) {
-                const currentEntry = entries[i];
-                const nextEntry = entries[i + 1];
-                const dateDiff = (new Date(nextEntry.date) - new Date(currentEntry.date)) / (1000 * 60 * 60 * 24);
-                
+                const current = entries[i], next = entries[i + 1];
+                const dateDiff = (new Date(next.date) - new Date(current.date)) / (1000 * 60 * 60 * 24);
                 if (dateDiff >= 1 && dateDiff <= 2) {
-                    if (
-                        nextEntry.symptoms["Fatigue"] - currentEntry.symptoms["Fatigue"] >= 2 &&
-                        currentEntry.symptoms["Heart Palpitations"] > 5
-                    ) {
-                        insights.push({
-                            type: "Fatigue Pattern Detected",
-                            message: "Your fatigue symptoms tend to worsen 24-48 hours after heart palpitations increase.",
-                            color: "bg-blue-100 border-l-4 border-blue-500",
-                            icon: "💡",
-                        });
+                    if (next.symptoms["Fatigue"] - current.symptoms["Fatigue"] >= 2 && current.symptoms["Heart Palpitations"] > 5) {
+                        insights.push({ type: "Fatigue Pattern Detected", message: "Your fatigue symptoms tend to worsen 24-48 hours after heart palpitations increase.", color: "bg-blue-100 border-l-4 border-blue-500", icon: "💡" });
                     }
                 }
             }
-
-            const twoWeeksAgo = new Date();
-            twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-            const recentEntries = entries.filter(entry => new Date(entry.date) >= twoWeeksAgo);
-            
-            if (recentEntries.length >= 2) {
-                const oldestEntry = recentEntries[0];
-                const newestEntry = recentEntries[recentEntries.length - 1];
-                
+            const twoWeeksAgo = new Date(); twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+            const recent = entries.filter(e => new Date(e.date) >= twoWeeksAgo);
+            if (recent.length >= 2) {
+                const oldest = recent[0], newest = recent[recent.length - 1];
                 symptomsList.forEach(symptom => {
-                    const oldValue = oldestEntry.symptoms[symptom] || 1;
-                    const newValue = newestEntry.symptoms[symptom] || 1;
-                    const decreasePercent = ((oldValue - newValue) / oldValue) * 100;
-                    
+                    const oldV = oldest.symptoms[symptom] || 1, newV = newest.symptoms[symptom] || 1;
+                    const decreasePercent = ((oldV - newV) / oldV) * 100;
                     if (decreasePercent >= 30) {
-                        insights.push({
-                            type: "Improvement Detected",
-                            message: `Your ${symptom.toLowerCase()} severity has decreased by ${Math.round(decreasePercent)}% over the past 2 weeks.`,
-                            color: "bg-green-100 border-l-4 border-green-500",
-                            icon: "✅",
-                        });
+                        insights.push({ type: "Improvement Detected", message: `Your ${symptom.toLowerCase()} severity has decreased by ${Math.round(decreasePercent)}% over the past 2 weeks.`, color: "bg-green-100 border-l-4 border-green-500", icon: "✅" });
                     }
                 });
             }
-
-            const brainFogEntries = entries.filter(entry => (entry.symptoms["Brain Fog"] || 1) > 1);
+            const brainFogEntries = entries.filter(e => (e.symptoms["Brain Fog"] || 1) > 1);
             if (brainFogEntries.length > 0) {
-                const hasImprovement = brainFogEntries.some((entry, index) => {
-                    if (index === 0) return false;
-                    const prevEntry = brainFogEntries[index - 1];
-                    return (entry.symptoms["Brain Fog"] || 1) < (prevEntry.symptoms["Brain Fog"] || 1);
-                });
-
+                const hasImprovement = brainFogEntries.some((e, i) => i > 0 && e.symptoms["Brain Fog"] < brainFogEntries[i - 1].symptoms["Brain Fog"]);
                 if (hasImprovement) {
-                    insights.push({
-                        type: "Medication Correlation",
-                        message: "Your brain fog symptoms appear to improve 2-3 hours after taking your morning medication.",
-                        color: "bg-purple-100 border-l-4 border-purple-500",
-                        icon: "💊",
-                    });
+                    insights.push({ type: "Medication Correlation", message: "Your brain fog symptoms appear to improve 2-3 hours after taking your morning medication.", color: "bg-purple-100 border-l-4 border-purple-500", icon: "💊" });
                 }
             }
-
             return (
                 <div className="mt-6">
                     <h2 className="text-xl font-semibold mb-2">Insights & Patterns</h2>
@@ -250,14 +173,11 @@
                         <p className="text-gray-500">No insights available yet. Keep logging to discover patterns!</p>
                     ) : (
                         <div className="space-y-4">
-                            {insights.map((insight, index) => (
-                                <div key={index} className={`p-4 rounded-lg ${insight.color}`}>
+                            {insights.map((i, idx) => (
+                                <div key={idx} className={`p-4 rounded-lg ${i.color}`}>
                                     <div className="flex items-center">
-                                        <span className="mr-2">{insight.icon}</span>
-                                        <div>
-                                            <h3 className="font-medium">{insight.type}</h3>
-                                            <p className="text-sm">{insight.message}</p>
-                                        </div>
+                                        <span className="mr-2">{i.icon}</span>
+                                        <div><h3 className="font-medium">{i.type}</h3><p className="text-sm">{i.message}</p></div>
                                     </div>
                                 </div>
                             ))}
@@ -267,95 +187,63 @@
             );
         };
 
-        const LoginForm = ({ onLogin, isAdmin = false, isPhysician = false, usersData }) => {
-            const [username, setUsername] = useState("");
-            const [password, setPassword] = useState("");
-            const [error, setError] = useState("");
+        const LoginForm = ({ onLogin }) => {
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [error, setError] = useState('');
 
-            const handleLogin = async () => {
-                const sanitizedUsername = sanitizeInput(username.trim());
-                const sanitizedPassword = sanitizeInput(password.trim());
-                const hashedPassword = await hashPassword(sanitizedPassword);
-
-                if (isAdmin) {
-                    const adminHash = await hashPassword("admin123");
-                    if (sanitizedUsername === "admin" && hashedPassword === adminHash) {
-                        const user = { username: "admin", name: "Admin", isAdmin: true };
-                        const token = generateSessionToken(user);
-                        sessionStorage.setItem('sessionToken', token);
-                        onLogin(user);
-                    } else {
-                        setError("Invalid admin credentials");
-                    }
-                } else if (isPhysician) {
-                    const user = usersData.find(u => u.username === sanitizedUsername && u.password === hashedPassword && u.isPhysician);
-                    if (user) {
-                        const token = generateSessionToken(user);
-                        sessionStorage.setItem('sessionToken', token);
-                        onLogin({ ...user, isPhysician: true });
-                    } else {
-                        setError("Invalid physician credentials or user is not a physician");
-                    }
-                } else {
-                    const user = usersData.find(u => u.username === sanitizedUsername && u.password === hashedPassword);
-                    if (user) {
-                        const token = generateSessionToken(user);
-                        sessionStorage.setItem('sessionToken', token);
-                        onLogin(user);
-                    } else {
-                        setError("Invalid username or password");
-                    }
+            const handleLogin = async (e) => {
+                e.preventDefault();
+                try {
+                    await waitForFirebase();
+                    if (!auth) throw new Error('Authentication not available');
+                    const userCredential = await auth.signInWithEmailAndPassword(email, password);
+                    const user = userCredential.user;
+                    const userDoc = await db.collection('users').doc(user.uid).get();
+                    const userData = userDoc.exists ? userDoc.data() : {
+                        email: user.email,
+                        role: email === 'cybrisjc@gmail.com' ? 'admin' :
+                              (email === 'drjones@metaboliclongcovidconsulting.com' ? 'physician' : 'patient')
+                    };
+                    if (!userDoc.exists) await db.collection('users').doc(user.uid).set(userData);
+                    onLogin({ id: user.uid, email: user.email, role: userData.role });
+                } catch (error) {
+                    setError('Invalid email or password');
                 }
             };
 
             return (
                 <div className="max-w-md mx-auto bg-white p-6 rounded-lg shadow-md">
-                    <h1 className="text-2xl font-bold mb-4">
-                        {isAdmin ? "Admin Login" : isPhysician ? "Physician Login" : "Login to Long COVID Symptom Journal"}
-                    </h1>
-                    <div className="mb-4">
-                        <label className="block text-lg font-medium mb-1">Username</label>
-                        <input
-                            type="text"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            className="w-full p-2 border rounded-lg"
-                            placeholder="Enter username"
-                        />
-                    </div>
-                    <div className="mb-4">
-                        <label className="block text-lg font-medium mb-1">Password</label>
-                        <input
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full p-2 border rounded-lg"
-                            placeholder="Enter password"
-                        />
-                    </div>
-                    {error && <p className="text-red-500 mb-4">{error}</p>}
-                    <button
-                        onClick={handleLogin}
-                        className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition"
-                    >
-                        Login
-                    </button>
-                    {!isAdmin && !isPhysician && (
-                        <div className="mt-2 space-y-2">
-                            <button
-                                onClick={() => onLogin(null, true)}
-                                className="w-full bg-gray-500 text-white py-2 rounded-lg hover:bg-gray-600 transition"
-                            >
-                                Admin Login
-                            </button>
-                            <button
-                                onClick={() => onLogin(null, false, true)}
-                                className="w-full bg-teal-500 text-white py-2 rounded-lg hover:bg-teal-600 transition"
-                            >
-                                Physician Login
-                            </button>
+                    <h1 className="text-2xl font-bold mb-4">Login to Long COVID Symptom Journal</h1>
+                    <form onSubmit={handleLogin}>
+                        <div className="mb-4">
+                            <label className="block text-lg font-medium mb-1">Email</label>
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                className="w-full p-2 border rounded-lg"
+                                placeholder="Enter email"
+                            />
                         </div>
-                    )}
+                        <div className="mb-4">
+                            <label className="block text-lg font-medium mb-1">Password</label>
+                            <input
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full p-2 border rounded-lg"
+                                placeholder="Enter password"
+                            />
+                        </div>
+                        {error && <p className="text-red-500 mb-4">{error}</p>}
+                        <button
+                            type="submit"
+                            className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition"
+                        >
+                            Login
+                        </button>
+                    </form>
                 </div>
             );
         };
@@ -363,73 +251,46 @@
         const PhysicianDashboard = ({ usersData, userSymptoms, currentPhysicianId, onLogout }) => {
             const [selectedUser, setSelectedUser] = useState(null);
 
-            const assignedPatients = usersData.filter(user => 
-                !user.isPhysician && !user.isAdmin && user.physicianId === currentPhysicianId
-            );
-
-            useEffect(() => {
-                if (selectedUser) {
-                    console.log("Selected User:", selectedUser);
-                    console.log("User Symptoms:", userSymptoms);
-                    console.log("Filtered Symptoms for userId", selectedUser.id, ":", 
-                        userSymptoms.filter(entry => entry.userId === selectedUser.id));
-                }
-            }, [selectedUser, userSymptoms]);
+            const assignedPatients = usersData.filter(u => !u.isPhysician && !u.isAdmin && u.physicianId === currentPhysicianId);
 
             return (
                 <div className="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-md">
                     <div className="flex justify-between items-center mb-4">
                         <h1 className="text-2xl font-bold">Physician Dashboard</h1>
-                        <button
-                            onClick={onLogout}
-                            className="bg-red-500 text-white py-1 px-3 rounded-lg hover:bg-red-600 transition"
-                        >
-                            Logout
-                        </button>
+                        <button onClick={onLogout} className="bg-red-500 text-white py-1 px-3 rounded-lg hover:bg-red-600 transition">Logout</button>
                     </div>
-
                     <h2 className="text-xl font-semibold mb-2">Assigned Patients</h2>
                     <div className="mb-4">
                         {assignedPatients.length === 0 ? (
                             <p className="text-gray-500">No patients assigned to you.</p>
                         ) : (
                             <div className="space-y-2">
-                                {assignedPatients.map(user => (
-                                    <div key={user.id} className="flex justify-between items-center border p-2 rounded-lg">
-                                        <span>{user.name} {user.lastName} ({user.username})</span>
-                                        <button
-                                            onClick={() => setSelectedUser(user)}
-                                            className="bg-blue-500 text-white py-1 px-2 rounded-lg hover:bg-blue-600 transition"
-                                        >
-                                            View Symptoms
-                                        </button>
+                                {assignedPatients.map(u => (
+                                    <div key={u.id} className="flex justify-between items-center border p-2 rounded-lg">
+                                        <span>{u.name} {u.lastName} ({u.username})</span>
+                                        <button onClick={() => setSelectedUser(u)} className="bg-blue-500 text-white py-1 px-2 rounded-lg hover:bg-blue-600 transition">View Symptoms</button>
                                     </div>
                                 ))}
                             </div>
                         )}
                     </div>
-
                     {selectedUser && (
                         <div>
                             <h2 className="text-xl font-semibold mb-2">Symptom History for {selectedUser.name} {selectedUser.lastName}</h2>
-                            {userSymptoms.filter(entry => entry.userId === selectedUser.id).length === 0 ? (
+                            {userSymptoms.filter(e => e.userId === selectedUser.id).length === 0 ? (
                                 <p className="text-gray-500">No entries for this user.</p>
                             ) : (
                                 <>
-                                    <SymptomChart entries={userSymptoms.filter(entry => entry.userId === selectedUser.id)} />
+                                    <SymptomChart entries={userSymptoms.filter(e => e.userId === selectedUser.id)} />
                                     <div className="space-y-4 mt-4">
-                                        {userSymptoms
-                                            .filter(entry => entry.userId === selectedUser.id)
-                                            .map((entry, index) => (
-                                                <div key={index} className="border p-4 rounded-lg">
-                                                    <h3 className="font-medium">{entry.date}</h3>
-                                                    {Object.entries(entry.symptoms).map(([name, value]) => (
-                                                        <p key={name} className="text-sm">
-                                                            {name}: {value}/10
-                                                        </p>
-                                                    ))}
-                                                </div>
-                                            ))}
+                                        {userSymptoms.filter(e => e.userId === selectedUser.id).map((e, i) => (
+                                            <div key={i} className="border p-4 rounded-lg">
+                                                <h3 className="font-medium">{e.date}</h3>
+                                                {Object.entries(e.symptoms).map(([n, v]) => (
+                                                    <p key={n} className="text-sm">{n}: {v}/10</p>
+                                                ))}
+                                            </div>
+                                        ))}
                                     </div>
                                 </>
                             )}
@@ -451,780 +312,171 @@
             const [showConfirmDialog, setShowConfirmDialog] = useState(false);
             const [userToRemoveId, setUserToRemoveId] = useState(null);
 
-            useEffect(() => {
-                if (selectedUser) {
-                    console.log("Selected User:", selectedUser);
-                    console.log("User Symptoms:", userSymptoms);
-                    console.log("Filtered Symptoms for userId", selectedUser.id, ":", 
-                        userSymptoms.filter(entry => entry.userId === selectedUser.id));
-                }
-            }, [selectedUser, userSymptoms]);
-
-            useEffect(() => {
-                if (showUndo) {
-                    const timer = setTimeout(() => {
-                        setShowUndo(false);
-                        setLastRemovedUser(null);
-                        setLastRemovedSymptoms([]);
-                    }, 10000);
-                    return () => clearTimeout(timer);
-                }
-            }, [showUndo]);
-
-            const physicians = usersData.filter(user => user.isPhysician);
+            const physicians = usersData.filter(u => u.isPhysician);
 
             const handleAddUser = async () => {
-                const sanitizedUsername = sanitizeInput(newUser.username);
-                const sanitizedName = sanitizeInput(newUser.name);
-                const sanitizedLastName = sanitizeInput(newUser.lastName);
-                const sanitizedPassword = sanitizeInput(newUser.password);
-                const hashedPassword = await hashPassword(sanitizedPassword);
-
-                if (sanitizedUsername && sanitizedName && sanitizedLastName && hashedPassword) {
+                const sanitizedUsername = sanitizeInput(newUser.username), sanitizedName = sanitizeInput(newUser.name),
+                    sanitizedLastName = sanitizeInput(newUser.lastName), sanitizedPassword = sanitizeInput(newUser.password);
+                if (sanitizedUsername && sanitizedName && sanitizedLastName && sanitizedPassword) {
                     if (newUser.isPhysician && newUser.physicianId) {
-                        alert("Physicians cannot be assigned to another physician.");
-                        return;
+                        alert("Physicians cannot be assigned to another physician."); return;
                     }
                     if (newUser.physicianId && !physicians.some(p => p.id === parseInt(newUser.physicianId))) {
-                        alert("Invalid physician selection.");
-                        return;
+                        alert("Invalid physician selection."); return;
                     }
-                    const newUserData = {
-                        username: sanitizedUsername,
-                        name: sanitizedName,
-                        lastName: sanitizedLastName,
-                        password: hashedPassword,
-                        isPhysician: newUser.isPhysician,
-                        physicianId: newUser.physicianId
-                    };
+                    const newUserData = { username: sanitizedUsername, name: sanitizedName, lastName: sanitizedLastName, password: sanitizedPassword, isPhysician: newUser.isPhysician, physicianId: newUser.physicianId };
                     const docRef = await db.collection("users").add(newUserData);
                     setUsersData([...usersData, { id: docRef.id, ...newUserData }]);
                     setNewUser({ username: "", name: "", lastName: "", password: "", isPhysician: false, physicianId: null });
-
-                    // Add user to Firebase Authentication
-                    try {
-                        await auth.createUserWithEmailAndPassword(`${sanitizedUsername}@example.com`, sanitizedPassword);
-                    } catch (error) {
-                        console.error("Failed to add user to Firebase Auth:", error);
-                    }
+                    try { await auth.createUserWithEmailAndPassword(`${sanitizedUsername}@example.com`, sanitizedPassword); } catch (e) { console.error("Failed to add user to Firebase Auth:", e); }
                 }
             };
 
             const handleUpdateUser = async () => {
                 if (updateUser) {
-                    const sanitizedName = sanitizeInput(updateUser.name);
-                    const sanitizedLastName = sanitizeInput(updateUser.lastName);
-                    const sanitizedPassword = sanitizeInput(updateUser.password);
-                    const hashedPassword = await hashPassword(sanitizedPassword);
-
+                    const sanitizedName = sanitizeInput(updateUser.name), sanitizedLastName = sanitizeInput(updateUser.lastName),
+                        sanitizedPassword = sanitizeInput(updateUser.password);
                     if (updateUser.isPhysician && updateUser.physicianId) {
-                        alert("Physicians cannot be assigned to another physician.");
-                        return;
+                        alert("Physicians cannot be assigned to another physician."); return;
                     }
                     if (updateUser.physicianId && !physicians.some(p => p.id === parseInt(updateUser.physicianId))) {
-                        alert("Invalid physician selection.");
-                        return;
+                        alert("Invalid physician selection."); return;
                     }
-                    const otherUsers = usersData.filter(user => user.id !== updateUser.id);
-                    if (updateUser.physicianId && otherUsers.some(user => user.physicianId === updateUser.physicianId && user.id === updateUser.id)) {
-                        alert("This patient is already assigned to another physician.");
-                        return;
-                    }
-                    const updatedUserData = {
-                        name: sanitizedName,
-                        lastName: sanitizedLastName,
-                        password: hashedPassword,
-                        isPhysician: updateUser.isPhysician,
-                        physicianId: updateUser.physicianId
-                    };
+                    const updatedUserData = { name: sanitizedName, lastName: sanitizedLastName, password: sanitizedPassword, isPhysician: updateUser.isPhysician, physicianId: updateUser.physicianId };
                     await db.collection("users").doc(updateUser.id).update(updatedUserData);
-                    setUsersData(usersData.map(user =>
-                        user.id === updateUser.id ? { ...user, ...updatedUserData } : user
-                    ));
+                    setUsersData(usersData.map(u => u.id === updateUser.id ? { ...u, ...updatedUserData } : u));
                     setUpdateUser(null);
-
-                    // Update Firebase Authentication password if changed
-                    try {
-                        const authUser = auth.currentUser;
-                        if (authUser && authUser.email === `${updateUser.username}@example.com`) {
-                            await authUser.updatePassword(sanitizedPassword);
-                        }
-                    } catch (error) {
-                        console.error("Failed to update user password in Firebase Auth:", error);
-                    }
+                    try { if (auth.currentUser && auth.currentUser.email === `${updateUser.username}@example.com`) await auth.currentUser.updatePassword(sanitizedPassword); } catch (e) { console.error("Failed to update user password in Firebase Auth:", e); }
                 }
             };
 
             const confirmRemoveUser = async () => {
-                const userId = userToRemoveId;
-                const userToRemove = usersData.find(user => user.id === userId);
-                if (!userToRemove) {
-                    setShowConfirmDialog(false);
-                    setUserToRemoveId(null);
-                    return;
-                }
-
-                const userSymptomsToRemove = userSymptoms.filter(entry => entry.userId === userId);
-                setLastRemovedUser(userToRemove);
-                setLastRemovedSymptoms(userSymptomsToRemove);
-                setShowUndo(true);
-
-                // Delete user from Firestore
+                const userId = userToRemoveId; const userToRemove = usersData.find(u => u.id === userId);
+                if (!userToRemove) { setShowConfirmDialog(false); setUserToRemoveId(null); return; }
+                const userSymptomsToRemove = userSymptoms.filter(e => e.userId === userId);
+                setLastRemovedUser(userToRemove); setLastRemovedSymptoms(userSymptomsToRemove); setShowUndo(true);
                 await db.collection("users").doc(userId).delete();
-                // Delete associated symptoms
-                const symptomsToDelete = userSymptoms.filter(entry => entry.userId === userId);
-                for (const symptomEntry of symptomsToDelete) {
-                    await db.collection("userSymptoms").doc(symptomEntry.id).delete();
-                }
-
-                setUsersData(usersData.filter(user => user.id !== userId));
-                setUserSymptoms(userSymptoms.filter(entry => entry.userId !== userId));
-                setSelectedUser(null);
-
-                setShowConfirmDialog(false);
-                setUserToRemoveId(null);
-
-                // Delete user from Firebase Authentication
-                try {
-                    const authUser = auth.currentUser;
-                    if (authUser && authUser.email === `${userToRemove.username}@example.com`) {
-                        await authUser.delete();
-                    }
-                } catch (error) {
-                    console.error("Failed to delete user from Firebase Auth:", error);
-                }
+                for (const e of userSymptoms.filter(e => e.userId === userId)) await db.collection("userSymptoms").doc(e.id).delete();
+                setUsersData(usersData.filter(u => u.id !== userId)); setUserSymptoms(userSymptoms.filter(e => e.userId !== userId)); setSelectedUser(null);
+                setShowConfirmDialog(false); setUserToRemoveId(null);
+                try { if (auth.currentUser && auth.currentUser.email === `${userToRemove.username}@example.com`) await auth.currentUser.delete(); } catch (e) { console.error("Failed to delete user from Firebase Auth:", e); }
             };
 
-            const cancelRemoveUser = () => {
-                setShowConfirmDialog(false);
-                setUserToRemoveId(null);
-            };
-
-            const handleUndoRemove = () => {
-                if (lastRemovedUser) {
-                    setUsersData([...usersData, lastRemovedUser]);
-                    setUserSymptoms([...userSymptoms, ...lastRemovedSymptoms]);
-                    setLastRemovedUser(null);
-                    setLastRemovedSymptoms([]);
-                    setShowUndo(false);
-                }
-            };
-
-            const handleAddSymptom = () => {
-                const sanitizedSymptom = sanitizeInput(newSymptom);
-                if (sanitizedSymptom && !symptomsList.includes(sanitizedSymptom)) {
-                    setSymptomsList([...symptomsList, sanitizedSymptom]);
-                    setNewSymptom("");
-                }
-            };
-
-            const handleUpdateSymptom = (oldSymptom) => {
-                const sanitizedNewSymptom = sanitizeInput(updateSymptom.newName);
-                if (updateSymptom && sanitizedNewSymptom && !symptomsList.includes(sanitizedNewSymptom)) {
-                    const updatedSymptomsList = symptomsList.map(symptom =>
-                        symptom === oldSymptom ? sanitizedNewSymptom : symptom
-                    );
-                    setSymptomsList(updatedSymptomsList);
-
-                    const updatedUserSymptoms = userSymptoms.map(entry => {
-                        const newSymptoms = { ...entry.symptoms };
-                        if (oldSymptom in newSymptoms) {
-                            newSymptoms[sanitizedNewSymptom] = newSymptoms[oldSymptom];
-                            delete newSymptoms[oldSymptom];
-                        }
-                        return { ...entry, symptoms: newSymptoms };
-                    });
-                    setUserSymptoms(updatedUserSymptoms);
-                    setUpdateSymptom(null);
-                }
-            };
-
-            const handleDeleteSymptom = (symptom) => {
-                setSymptomsList(symptomsList.filter(s => s !== symptom));
-                const updatedUserSymptoms = userSymptoms.map(entry => {
-                    const newSymptoms = { ...entry.symptoms };
-                    delete newSymptoms[symptom];
-                    return { ...entry, symptoms: newSymptoms };
-                });
-                setUserSymptoms(updatedUserSymptoms);
-            };
+            const cancelRemoveUser = () => { setShowConfirmDialog(false); setUserToRemoveId(null); };
+            const handleUndoRemove = () => { if (lastRemovedUser) { setUsersData([...usersData, lastRemovedUser]); setUserSymptoms([...userSymptoms, ...lastRemovedSymptoms]); setLastRemovedUser(null); setLastRemovedSymptoms([]); setShowUndo(false); } };
+            const handleAddSymptom = () => { const s = sanitizeInput(newSymptom); if (s && !symptomsList.includes(s)) { setSymptomsList([...symptomsList, s]); setNewSymptom(""); } };
+            const handleUpdateSymptom = (oldSymptom) => { const s = sanitizeInput(updateSymptom.newName); if (updateSymptom && s && !symptomsList.includes(s)) { setSymptomsList(symptomsList.map(sym => sym === oldSymptom ? s : sym)); setUserSymptoms(userSymptoms.map(e => { const ns = { ...e.symptoms }; if (oldSymptom in ns) { ns[s] = ns[oldSymptom]; delete ns[oldSymptom]; } return { ...e, symptoms: ns }; })); setUpdateSymptom(null); } };
+            const handleDeleteSymptom = (symptom) => { setSymptomsList(symptomsList.filter(s => s !== symptom)); setUserSymptoms(userSymptoms.map(e => { const ns = { ...e.symptoms }; delete ns[symptom]; return { ...e, symptoms: ns }; })); };
 
             return (
                 <div className="max-w-2xl mx-auto bg-white p-6 rounded-lg shadow-md">
-                    <div className="flex justify-between items-center mb-4">
-                        <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-                        <button
-                            onClick={onLogout}
-                            className="bg-red-500 text-white py-1 px-3 rounded-lg hover:bg-red-600 transition"
-                        >
-                            Logout
-                        </button>
-                    </div>
-
-                    {showUndo && (
-                        <div className="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded-lg flex justify-between items-center">
-                            <p>
-                                Removed {lastRemovedUser.name} {lastRemovedUser.lastName}. 
-                                <button
-                                    onClick={handleUndoRemove}
-                                    className="ml-2 text-blue-500 underline hover:text-blue-700"
-                                >
-                                    Undo
-                                </button>
-                            </p>
-                        </div>
-                    )}
-
-                    {showConfirmDialog && (
-                        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-                            <div className="bg-white p-6 rounded-lg shadow-lg max-w-sm w-full">
-                                <h2 className="text-lg font-semibold mb-4">Confirm Removal</h2>
-                                <p className="mb-4">
-                                    Are you sure you want to remove{" "}
-                                    {usersData.find(user => user.id === userToRemoveId)?.name}{" "}
-                                    {usersData.find(user => user.id === userToRemoveId)?.lastName}{" "}
-                                    ({usersData.find(user => user.id === userToRemoveId)?.username})?
-                                    This action will also remove their symptom data.
-                                </p>
-                                <div className="flex justify-end space-x-2">
-                                    <button
-                                        onClick={cancelRemoveUser}
-                                        className="bg-gray-300 text-black py-2 px-4 rounded-lg hover:bg-gray-400 transition"
-                                    >
-                                        Cancel
-                                    </button>
-                                    <button
-                                        onClick={confirmRemoveUser}
-                                        className="bg-red-500 text-white py-2 px-4 rounded-lg hover:bg-red-600 transition"
-                                    >
-                                        Remove
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
+                    <div className="flex justify-between items-center mb-4"><h1 className="text-2xl font-bold">Admin Dashboard</h1><button onClick={onLogout} className="bg-red-500 text-white py-1 px-3 rounded-lg hover:bg-red-600 transition">Logout</button></div>
+                    {showUndo && <div className="mb-4 p-4 bg-yellow-100 border-l-4 border-yellow-500 rounded-lg flex justify-between items-center"><p>Removed {lastRemovedUser.name} {lastRemovedUser.lastName}. <button onClick={handleUndoRemove} className="ml-2 text-blue-500 underline hover:text-blue-700">Undo</button></p></div>}
+                    {showConfirmDialog && <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"><div className="bg-white p-6 rounded-lg shadow-lg max-w-sm w-full"><h2 className="text-lg font-semibold mb-4">Confirm Removal</h2><p className="mb-4">Are you sure you want to remove {usersData.find(u => u.id === userToRemoveId)?.name} {usersData.find(u => u.id === userToRemoveId)?.lastName} ({usersData.find(u => u.id === userToRemoveId)?.username})? This action will also remove their symptom data.</p><div className="flex justify-end space-x-2"><button onClick={cancelRemoveUser} className="bg-gray-300 text-black py-2 px-4 rounded-lg hover:bg-gray-400 transition">Cancel</button><button onClick={confirmRemoveUser} className="bg-red-500 text-white py-2 px-4 rounded-lg hover:bg-red-600 transition">Remove</button></div></div></div>}
                     <h2 className="text-xl font-semibold mb-2">Manage Users</h2>
-                    <div className="mb-4">
-                        <h3 className="text-lg font-medium mb-1">Add New User</h3>
-                        <div className="grid grid-cols-2 gap-2 mb-2">
-                            <input
-                                type="text"
-                                placeholder="Username"
-                                value={newUser.username}
-                                onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
-                                className="p-2 border rounded-lg"
-                            />
-                            <input
-                                type="text"
-                                placeholder="First Name"
-                                value={newUser.name}
-                                onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
-                                className="p-2 border rounded-lg"
-                            />
-                            <input
-                                type="text"
-                                placeholder="Last Name"
-                                value={newUser.lastName}
-                                onChange={(e) => setNewUser({ ...newUser, lastName: e.target.value })}
-                                className="p-2 border rounded-lg"
-                            />
-                            <input
-                                type="password"
-                                placeholder="Password"
-                                value={newUser.password}
-                                onChange={(e) => setNewUser({ ...newUser, password: e.target.value })}
-                                className="p-2 border rounded-lg"
-                            />
-                            <div className="col-span-2 flex items-center space-x-2">
-                                <input
-                                    type="checkbox"
-                                    checked={newUser.isPhysician}
-                                    onChange={(e) => setNewUser({ ...newUser, isPhysician: e.target.checked })}
-                                    className="h-4 w-4"
-                                />
-                                <label className="text-sm">Is Physician</label>
-                            </div>
-                            {!newUser.isPhysician && (
-                                <div className="col-span-2">
-                                    <label className="block text-sm font-medium mb-1">Assign to Physician</label>
-                                    <select
-                                        value={newUser.physicianId || ""}
-                                        onChange={(e) => setNewUser({ ...newUser, physicianId: e.target.value ? parseInt(e.target.value) : null })}
-                                        className="w-full p-2 border rounded-lg"
-                                    >
-                                        <option value="">None</option>
-                                        {physicians.map(physician => (
-                                            <option key={physician.id} value={physician.id}>
-                                                {physician.name} {physician.lastName}
-                                            </option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-                        </div>
-                        <button
-                            onClick={handleAddUser}
-                            className="w-full bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition"
-                        >
-                            Add User
-                        </button>
-                    </div>
-
-                    <div className="mb-4">
-                        <h3 className="text-lg font-medium mb-1">User List</h3>
-                        <div className="space-y-2">
-                            {usersData.map(user => {
-                                const assignedPhysician = user.physicianId ? physicians.find(p => p.id === user.physicianId) : null;
-                                return (
-                                    <div key={user.id} className="flex justify-between items-center border p-2 rounded-lg">
-                                        <span>
-                                            {user.name} {user.lastName} ({user.username}) 
-                                            {user.isPhysician ? "[Physician]" : assignedPhysician ? ` [Assigned to ${assignedPhysician.name} ${assignedPhysician.lastName}]` : ""}
-                                        </span>
-                                        <div className="space-x-2">
-                                            <button
-                                                onClick={() => setUpdateUser(user)}
-                                                className="bg-yellow-500 text-white py-1 px-2 rounded-lg hover:bg-yellow-600 transition"
-                                            >
-                                                Update
-                                            </button>
-                                            <button
-                                                onClick={() => handleRemoveUser(user.id)}
-                                                className="bg-red-500 text-white py-1 px-2 rounded-lg hover:bg-red-600 transition"
-                                            >
-                                                Remove
-                                            </button>
-                                            <button
-                                                onClick={() => setSelectedUser(user)}
-                                                className="bg-blue-500 text-white py-1 px-2 rounded-lg hover:bg-blue-600 transition"
-                                            >
-                                                View Symptoms
-                                            </button>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    {updateUser && (
-                        <div className="mb-4">
-                            <h3 className="text-lg font-medium mb-1">Update User: {updateUser.username}</h3>
-                            <div className="grid grid-cols-2 gap-2 mb-2">
-                                <input
-                                    type="text"
-                                    placeholder="First Name"
-                                    value={updateUser.name}
-                                    onChange={(e) => setUpdateUser({ ...updateUser, name: e.target.value })}
-                                    className="p-2 border rounded-lg"
-                                />
-                                <input
-                                    type="text"
-                                    placeholder="Last Name"
-                                    value={updateUser.lastName}
-                                    onChange={(e) => setUpdateUser({ ...updateUser, lastName: e.target.value })}
-                                    className="p-2 border rounded-lg"
-                                />
-                                <input
-                                    type="password"
-                                    placeholder="Password"
-                                    value={updateUser.password}
-                                    onChange={(e) => setUpdateUser({ ...updateUser, password: e.target.value })}
-                                    className="p-2 border rounded-lg col-span-2"
-                                />
-                                <div className="col-span-2 flex items-center space-x-2">
-                                    <input
-                                        type="checkbox"
-                                        checked={updateUser.isPhysician || false}
-                                        onChange={(e) => setUpdateUser({ ...updateUser, isPhysician: e.target.checked })}
-                                        className="h-4 w-4"
-                                    />
-                                    <label className="text-sm">Is Physician</label>
-                                </div>
-                                {!updateUser.isPhysician && (
-                                    <div className="col-span-2">
-                                        <label className="block text-sm font-medium mb-1">Assign to Physician</label>
-                                        <select
-                                            value={updateUser.physicianId || ""}
-                                            onChange={(e) => setUpdateUser({ ...updateUser, physicianId: e.target.value ? parseInt(e.target.value) : null })}
-                                            className="w-full p-2 border rounded-lg"
-                                        >
-                                            <option value="">None</option>
-                                            {physicians.map(physician => (
-                                                <option key={physician.id} value={physician.id}>
-                                                    {physician.name} {physician.lastName}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    </div>
-                                )}
-                            </div>
-                            <button
-                                onClick={handleUpdateUser}
-                                className="w-full bg-yellow-500 text-white py-2 rounded-lg hover:bg-yellow-600 transition"
-                            >
-                                Update User
-                            </button>
-                        </div>
-                    )}
-
+                    <div className="mb-4"><h3 className="text-lg font-medium mb-1">Add New User</h3><div className="grid grid-cols-2 gap-2 mb-2"><input type="text" placeholder="Username" value={newUser.username} onChange={(e) => setNewUser({ ...newUser, username: e.target.value })} className="p-2 border rounded-lg" /><input type="text" placeholder="First Name" value={newUser.name} onChange={(e) => setNewUser({ ...newUser, name: e.target.value })} className="p-2 border rounded-lg" /><input type="text" placeholder="Last Name" value={newUser.lastName} onChange={(e) => setNewUser({ ...newUser, lastName: e.target.value })} className="p-2 border rounded-lg" /><input type="password" placeholder="Password" value={newUser.password} onChange={(e) => setNewUser({ ...newUser, password: e.target.value })} className="p-2 border rounded-lg" /><div className="col-span-2 flex items-center space-x-2"><input type="checkbox" checked={newUser.isPhysician} onChange={(e) => setNewUser({ ...newUser, isPhysician: e.target.checked })} className="h-4 w-4" /><label className="text-sm">Is Physician</label></div>{!newUser.isPhysician && <div className="col-span-2"><label className="block text-sm font-medium mb-1">Assign to Physician</label><select value={newUser.physicianId || ""} onChange={(e) => setNewUser({ ...newUser, physicianId: e.target.value ? parseInt(e.target.value) : null })} className="w-full p-2 border rounded-lg"><option value="">None</option>{physicians.map(p => <option key={p.id} value={p.id}>{p.name} {p.lastName}</option>)}</select></div>}</div><button onClick={handleAddUser} className="w-full bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition">Add User</button></div>
+                    <div className="mb-4"><h3 className="text-lg font-medium mb-1">User List</h3><div className="space-y-2">{usersData.map(u => { const p = u.physicianId ? physicians.find(p => p.id === u.physicianId) : null; return <div key={u.id} className="flex justify-between items-center border p-2 rounded-lg"><span>{u.name} {u.lastName} ({u.username}) {u.isPhysician ? "[Physician]" : p ? `[Assigned to ${p.name} ${p.lastName}]` : ""}</span><div className="space-x-2"><button onClick={() => setUpdateUser(u)} className="bg-yellow-500 text-white py-1 px-2 rounded-lg hover:bg-yellow-600 transition">Update</button><button onClick={() => { setUserToRemoveId(u.id); setShowConfirmDialog(true); }} className="bg-red-500 text-white py-1 px-2 rounded-lg hover:bg-red-600 transition">Remove</button><button onClick={() => setSelectedUser(u)} className="bg-blue-500 text-white py-1 px-2 rounded-lg hover:bg-blue-600 transition">View Symptoms</button></div></div>; })}</div></div>
+                    {updateUser && <div className="mb-4"><h3 className="text-lg font-medium mb-1">Update User: {updateUser.username}</h3><div className="grid grid-cols-2 gap-2 mb-2"><input type="text" placeholder="First Name" value={updateUser.name} onChange={(e) => setUpdateUser({ ...updateUser, name: e.target.value })} className="p-2 border rounded-lg" /><input type="text" placeholder="Last Name" value={updateUser.lastName} onChange={(e) => setUpdateUser({ ...updateUser, lastName: e.target.value })} className="p-2 border rounded-lg" /><input type="password" placeholder="Password" value={updateUser.password} onChange={(e) => setUpdateUser({ ...updateUser, password: e.target.value })} className="p-2 border rounded-lg col-span-2" /><div className="col-span-2 flex items-center space-x-2"><input type="checkbox" checked={updateUser.isPhysician || false} onChange={(e) => setUpdateUser({ ...updateUser, isPhysician: e.target.checked })} className="h-4 w-4" /><label className="text-sm">Is Physician</label></div>{!updateUser.isPhysician && <div className="col-span-2"><label className="block text-sm font-medium mb-1">Assign to Physician</label><select value={updateUser.physicianId || ""} onChange={(e) => setUpdateUser({ ...updateUser, physicianId: e.target.value ? parseInt(e.target.value) : null })} className="w-full p-2 border rounded-lg"><option value="">None</option>{physicians.map(p => <option key={p.id} value={p.id}>{p.name} {p.lastName}</option>)}</select></div>}</div><button onClick={handleUpdateUser} className="w-full bg-yellow-500 text-white py-2 rounded-lg hover:bg-yellow-600 transition">Update User</button></div>}
                     <h2 className="text-xl font-semibold mb-2">Manage Symptoms</h2>
-                    <div className="mb-4">
-                        <h3 className="text-lg font-medium mb-1">Add New Symptom</h3>
-                        <div className="flex space-x-2 mb-2">
-                            <input
-                                type="text"
-                                placeholder="Symptom Name"
-                                value={newSymptom}
-                                onChange={(e) => setNewSymptom(e.target.value)}
-                                className="p-2 border rounded-lg flex-1"
-                            />
-                        </div>
-                        <button
-                            onClick={handleAddSymptom}
-                            className="w-full bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition"
-                        >
-                            Add Symptom
-                        </button>
-                    </div>
-
-                    <div className="mb-4">
-                        <h3 className="text-lg font-medium mb-1">Symptom List</h3>
-                        <div className="space-y-2">
-                            {symptomsList.map((symptom, index) => (
-                                <div key={index} className="flex justify-between items-center border p-2 rounded-lg">
-                                    <span>{symptom}</span>
-                                    <div className="space-x-2">
-                                        <button
-                                            onClick={() => setUpdateSymptom({ oldName: symptom, newName: symptom })}
-                                            className="bg-yellow-500 text-white py-1 px-2 rounded-lg hover:bg-yellow-600 transition"
-                                        >
-                                            Update
-                                        </button>
-                                        <button
-                                            onClick={() => handleDeleteSymptom(symptom)}
-                                            className="bg-red-500 text-white py-1 px-2 rounded-lg hover:bg-red-600 transition"
-                                        >
-                                            Delete
-                                        </button>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {updateSymptom && (
-                        <div className="mb-4">
-                            <h3 className="text-lg font-medium mb-1">Update Symptom: {updateSymptom.oldName}</h3>
-                            <div className="flex space-x-2 mb-2">
-                                <input
-                                    type="text"
-                                    placeholder="New Symptom Name"
-                                    value={updateSymptom.newName}
-                                    onChange={(e) => setUpdateSymptom({ ...updateSymptom, newName: e.target.value })}
-                                    className="p-2 border rounded-lg flex-1"
-                                />
-                            </div>
-                            <button
-                                onClick={() => handleUpdateSymptom(updateSymptom.oldName)}
-                                className="w-full bg-yellow-500 text-white py-2 rounded-lg hover:bg-yellow-600 transition"
-                            >
-                                Update Symptom
-                            </button>
-                        </div>
-                    )}
-
-                    {selectedUser && (
-                        <div>
-                            <h2 className="text-xl font-semibold mb-2">Symptom History for {selectedUser.name} {selectedUser.lastName}</h2>
-                            {userSymptoms.filter(entry => entry.userId === selectedUser.id).length === 0 ? (
-                                <p className="text-gray-500">No entries for this user.</p>
-                            ) : (
-                                <>
-                                    <SymptomChart entries={userSymptoms.filter(entry => entry.userId === selectedUser.id)} />
-                                    <div className="space-y-4 mt-4">
-                                        {userSymptoms
-                                            .filter(entry => entry.userId === selectedUser.id)
-                                            .map((entry, index) => (
-                                                <div key={index} className="border p-4 rounded-lg">
-                                                    <h3 className="font-medium">{entry.date}</h3>
-                                                    {Object.entries(entry.symptoms).map(([name, value]) => (
-                                                        <p key={name} className="text-sm">
-                                                            {name}: {value}/10
-                                                        </p>
-                                                    ))}
-                                                </div>
-                                            ))}
-                                    </div>
-                                </>
-                            )}
-                        </div>
-                    )}
+                    <div className="mb-4"><h3 className="text-lg font-medium mb-1">Add New Symptom</h3><div className="flex space-x-2 mb-2"><input type="text" placeholder="Symptom Name" value={newSymptom} onChange={(e) => setNewSymptom(e.target.value)} className="p-2 border rounded-lg flex-1" /></div><button onClick={handleAddSymptom} className="w-full bg-green-500 text-white py-2 rounded-lg hover:bg-green-600 transition">Add Symptom</button></div>
+                    <div className="mb-4"><h3 className="text-lg font-medium mb-1">Symptom List</h3><div className="space-y-2">{symptomsList.map((s, i) => <div key={i} className="flex justify-between items-center border p-2 rounded-lg"><span>{s}</span><div className="space-x-2"><button onClick={() => setUpdateSymptom({ oldName: s, newName: s })} className="bg-yellow-500 text-white py-1 px-2 rounded-lg hover:bg-yellow-600 transition">Update</button><button onClick={() => handleDeleteSymptom(s)} className="bg-red-500 text-white py-1 px-2 rounded-lg hover:bg-red-600 transition">Delete</button></div></div>)}</div></div>
+                    {updateSymptom && <div className="mb-4"><h3 className="text-lg font-medium mb-1">Update Symptom: {updateSymptom.oldName}</h3><div className="flex space-x-2 mb-2"><input type="text" placeholder="New Symptom Name" value={updateSymptom.newName} onChange={(e) => setUpdateSymptom({ ...updateSymptom, newName: e.target.value })} className="p-2 border rounded-lg flex-1" /></div><button onClick={() => handleUpdateSymptom(updateSymptom.oldName)} className="w-full bg-yellow-500 text-white py-2 rounded-lg hover:bg-yellow-600 transition">Update Symptom</button></div>}
+                    {selectedUser && <div><h2 className="text-xl font-semibold mb-2">Symptom History for {selectedUser.name} {selectedUser.lastName}</h2>{userSymptoms.filter(e => e.userId === selectedUser.id).length === 0 ? <p className="text-gray-500">No entries for this user.</p> : <><SymptomChart entries={userSymptoms.filter(e => e.userId === selectedUser.id)} /><div className="space-y-4 mt-4">{userSymptoms.filter(e => e.userId === selectedUser.id).map((e, i) => <div key={i} className="border p-4 rounded-lg"><h3 className="font-medium">{e.date}</h3>{Object.entries(e.symptoms).map(([n, v]) => <p key={n} className="text-sm">{n}: {v}/10</p>)}</div>)}</div></>}</div>}
                 </div>
             );
         };
 
         const App = () => {
             const [user, setUser] = useState(null);
-            const [isAdminLogin, setIsAdminLogin] = useState(false);
-            const [isPhysicianLogin, setIsPhysicianLogin] = useState(false);
             const [usersData, setUsersData] = useState([]);
-            const [symptomsList, setSymptomsList] = useState([
-                "Fatigue",
-                "Brain Fog",
-                "Sleep Problems",
-                "Joint Pain",
-                "Headache",
-                "Heart Palpitations",
-                "Rashes",
-                "Muscle Aches",
-                "Metabolism"
-            ]);
+            const [symptomsList, setSymptomsList] = useState(["Fatigue", "Brain Fog", "Sleep Problems", "Joint Pain", "Headache", "Heart Palpitations", "Rashes", "Muscle Aches", "Metabolism"]);
             const [userSymptoms, setUserSymptoms] = useState([]);
-            const [symptoms, setSymptoms] = useState(() => {
-                const initialSymptoms = {};
-                symptomsList.forEach(symptom => {
-                    initialSymptoms[symptom] = 1;
-                });
-                return initialSymptoms;
-            });
+            const [symptoms, setSymptoms] = useState(() => symptomsList.reduce((acc, s) => ({ ...acc, [s]: 1 }), {}));
             const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-            // Load data from Firestore on mount
             useEffect(() => {
-                const loadUsersData = async () => {
-                    const snapshot = await db.collection("users").get();
-                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setUsersData(data);
+                const loadData = async () => {
+                    await waitForFirebase();
+                    if (!db) return;
+                    const usersSnapshot = await db.collection("users").get();
+                    setUsersData(usersSnapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+                    const symptomsSnapshot = await db.collection("userSymptoms").get();
+                    setUserSymptoms(symptomsSnapshot.docs.map(d => ({ id: d.id, ...d.data() })));
                 };
-
-                const loadUserSymptoms = async () => {
-                    const snapshot = await db.collection("userSymptoms").get();
-                    const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    setUserSymptoms(data);
-                };
-
-                loadUsersData();
-                loadUserSymptoms();
+                loadData();
             }, []);
 
-            // Load session user
             useEffect(() => {
-                const token = sessionStorage.getItem('sessionToken');
-                if (token) {
-                    const sessionUser = verifySessionToken(token);
-                    if (sessionUser) {
-                        const foundUser = usersData.find(u => u.id === sessionUser.id && u.username === sessionUser.username);
-                        if (foundUser) {
-                            setUser({ ...foundUser, isAdmin: foundUser.username === "admin", isPhysician: foundUser.isPhysician });
-                        } else {
-                            sessionStorage.removeItem('sessionToken');
-                        }
+                const unsubscribe = auth.onAuthStateChanged(async (authUser) => {
+                    if (authUser) {
+                        const userDoc = await db.collection('users').doc(authUser.uid).get();
+                        const userData = userDoc.exists ? userDoc.data() : { email: authUser.email, role: 'patient' };
+                        if (!userDoc.exists) await db.collection('users').doc(authUser.uid).set(userData);
+                        setUser({ id: authUser.uid, email: authUser.email, role: userData.role });
                     } else {
-                        sessionStorage.removeItem('sessionToken');
+                        setUser(null);
                     }
-                }
-            }, [usersData]);
+                });
+                return () => unsubscribe();
+            }, []);
 
-            // Update symptoms list when symptomsList changes
             useEffect(() => {
                 setSymptoms(prev => {
-                    const updatedSymptoms = { ...prev };
-                    symptomsList.forEach(symptom => {
-                        if (!(symptom in updatedSymptoms)) {
-                            updatedSymptoms[symptom] = 1;
-                        }
-                    });
-                    Object.keys(updatedSymptoms).forEach(symptom => {
-                        if (!symptomsList.includes(symptom)) {
-                            delete updatedSymptoms[symptom];
-                        }
-                    });
-                    return updatedSymptoms;
+                    const updated = { ...prev };
+                    symptomsList.forEach(s => { if (!(s in updated)) updated[s] = 1; });
+                    Object.keys(updated).forEach(s => { if (!symptomsList.includes(s)) delete updated[s]; });
+                    return updated;
                 });
             }, [symptomsList]);
 
-            const handleSliderChange = (symptom, value) => {
-                setSymptoms({ ...symptoms, [symptom]: value });
-            };
-
-            const handleDateChange = (e) => {
-                setSelectedDate(e.target.value);
-            };
-
+            const handleSliderChange = (symptom, value) => setSymptoms({ ...symptoms, [symptom]: value });
+            const handleDateChange = (e) => setSelectedDate(e.target.value);
             const handleSave = async () => {
                 if (!user || !user.id) return;
-
-                const newEntry = {
-                    userId: user.id,
-                    date: selectedDate,
-                    symptoms: { ...symptoms },
-                };
-
-                // Check for existing entry on the same date
-                const existingEntry = userSymptoms.find(
-                    entry => entry.date === selectedDate && entry.userId === user.id
-                );
-
-                if (existingEntry) {
-                    // Update existing entry in Firestore
-                    await db.collection("userSymptoms").doc(existingEntry.id).update(newEntry);
-                    setUserSymptoms(userSymptoms.map(entry =>
-                        entry.id === existingEntry.id ? { ...entry, ...newEntry } : entry
-                    ));
+                const newEntry = { userId: user.id, date: selectedDate, symptoms: { ...symptoms } };
+                const existing = userSymptoms.find(e => e.date === selectedDate && e.userId === user.id);
+                if (existing) {
+                    await db.collection("userSymptoms").doc(existing.id).update(newEntry);
+                    setUserSymptoms(userSymptoms.map(e => e.id === existing.id ? { ...e, ...newEntry } : e));
                 } else {
-                    // Add new entry to Firestore
                     const docRef = await db.collection("userSymptoms").add(newEntry);
-                    setUserSymptoms([...userSymptoms, { id: docRef.id, ...newEntry}].sort((a, b) => new Date(a.date) - new Date(b.date)));
+                    setUserSymptoms([...userSymptoms, { id: docRef.id, ...newEntry }].sort((a, b) => new Date(a.date) - new Date(b.date)));
                 }
-
-                // Reset form
-                setSymptoms(prev => {
-                    const resetSymptoms = {};
-                    symptomsList.forEach(symptom => {
-                        resetSymptoms[symptom] = 1;
-                    });
-                    return resetSymptoms;
-                });
+                setSymptoms(symptomsList.reduce((acc, s) => ({ ...acc, [s]: 1 }), {}));
                 setSelectedDate(new Date().toISOString().split('T')[0]);
             };
 
-            const handleLogin = (loggedInUser, switchToAdmin = false, switchToPhysician = false) => {
-                if (switchToAdmin) {
-                    setIsAdminLogin(true);
-                    setIsPhysicianLogin(false);
-                    setUser(null);
-                } else if (switchToPhysician) {
-                    setIsPhysicianLogin(true);
-                    setIsAdminLogin(false);
-                    setUser(null);
-                } else if (loggedInUser) {
-                    setUser(loggedInUser);
-                    setIsAdminLogin(false);
-                    setIsPhysicianLogin(false);
-                }
-            };
+            const handleLogout = () => { auth.signOut(); };
 
-            const handleLogout = () => {
-                setUser(null);
-                setIsAdminLogin(false);
-                setIsPhysicianLogin(false);
-                sessionStorage.removeItem('sessionToken');
-            };
-
-            if (!user) {
-                return (
-                    <LoginForm
-                        onLogin={handleLogin}
-                        isAdmin={isAdminLogin}
-                        isPhysician={isPhysicianLogin}
-                        usersData={usersData}
-                    />
-                );
-            }
-
-            if (user.isAdmin) {
-                return (
-                    <AdminDashboard
-                        usersData={usersData}
-                        setUsersData={setUsersData}
-                        userSymptoms={userSymptoms}
-                        setUserSymptoms={setUserSymptoms}
-                        symptomsList={symptomsList}
-                        setSymptomsList={setSymptomsList}
-                        onLogout={handleLogout}
-                    />
-                );
-            }
-
-            if (user.isPhysician) {
-                return (
-                    <PhysicianDashboard
-                        usersData={usersData}
-                        userSymptoms={userSymptoms}
-                        currentPhysicianId={user.id}
-                        onLogout={handleLogout}
-                    />
-                );
-            }
+            if (!user) return <LoginForm onLogin={setUser} />;
+            if (user.role === 'admin') return <AdminDashboard usersData={usersData} setUsersData={setUsersData} userSymptoms={userSymptoms} setUserSymptoms={setUserSymptoms} symptomsList={symptomsList} setSymptomsList={setSymptomsList} onLogout={handleLogout} />;
+            if (user.role === 'physician') return <PhysicianDashboard usersData={usersData} userSymptoms={userSymptoms} currentPhysicianId={user.id} onLogout={handleLogout} />;
 
             return (
                 <div className="max-w-md mx-auto bg-white p-6 rounded-lg shadow-md relative">
                     <div className="flex justify-between items-center mb-4">
                         <h1 className="text-2xl font-bold">Long COVID Symptom Journal</h1>
                         <div className="flex items-center space-x-2">
-                            <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center">
-                                {user.name.split(" ").map(n => n[0]).join("")}
-                            </div>
-                            <span>{user.name} {user.lastName}</span>
-                            <button
-                                onClick={handleLogout}
-                                className="bg-red-500 text-white py-1 px-3 rounded-lg hover:bg-red-600 transition"
-                            >
-                                Logout
-                            </button>
+                            <div className="w-8 h-8 bg-blue-500 text-white rounded-full flex items-center justify-center">{user.email.split("@")[0].split("")[0]}</div>
+                            <span>{user.email}</span>
+                            <button onClick={handleLogout} className="bg-red-500 text-white py-1 px-3 rounded-lg hover:bg-red-600 transition">Logout</button>
                         </div>
                     </div>
-
                     <h2 className="text-xl font-semibold mb-2">Log Symptoms</h2>
-                    <div className="mb-4">
-                        <label className="block text-lg font-medium mb-1">Select Date</label>
-                        <input
-                            type="date"
-                            value={selectedDate}
-                            onChange={handleDateChange}
-                            className="w-full p-2 border rounded-lg"
-                            max={new Date().toISOString().split('T')[0]}
-                        />
-                    </div>
-
-                    {symptomsList.map((name) => (
-                        <SymptomSlider
-                            key={name}
-                            name={name}
-                            value={symptoms[name]}
-                            onChange={handleSliderChange}
-                        />
-                    ))}
-
-                    <button
-                        onClick={handleSave}
-                        className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition"
-                    >
-                        Save Entry
-                    </button>
-
-                    <InsightsSection entries={userSymptoms.filter(entry => entry.userId === user.id)} symptomsList={symptomsList} />
-
+                    <div className="mb-4"><label className="block text-lg font-medium mb-1">Select Date</label><input type="date" value={selectedDate} onChange={handleDateChange} className="w-full p-2 border rounded-lg" max={new Date().toISOString().split('T')[0]} /></div>
+                    {symptomsList.map(n => <SymptomSlider key={n} name={n} value={symptoms[n]} onChange={handleSliderChange} />)}
+                    <button onClick={handleSave} className="w-full bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600 transition">Save Entry</button>
+                    <InsightsSection entries={userSymptoms.filter(e => e.userId === user.id)} symptomsList={symptomsList} />
                     <h2 className="text-xl font-semibold mt-6 mb-2">Symptom History</h2>
-                    {userSymptoms.filter(entry => entry.userId === user.id).length === 0 ? (
-                        <p className="text-gray-500">No entries yet.</p>
-                    ) : (
-                        <>
-                            <SymptomChart entries={userSymptoms.filter(entry => entry.userId === user.id)} />
-                            <div className="space-y-4 mt-4">
-                                {userSymptoms
-                                    .filter(entry => entry.userId === user.id)
-                                    .map((entry, index) => (
-                                        <div key={index} className="border p-4 rounded-lg">
-                                            <h3 className="font-medium">{entry.date}</h3>
-                                            {Object.entries(entry.symptoms).map(([name, value]) => (
-                                                <p key={name} className="text-sm">
-                                                    {name}: {value}/10
-                                                </p>
-                                            ))}
-                                        </div>
-                                    ))}
-                            </div>
-                        </>
-                    )}
+                    {userSymptoms.filter(e => e.userId === user.id).length === 0 ? <p className="text-gray-500">No entries yet.</p> : <><SymptomChart entries={userSymptoms.filter(e => e.userId === user.id)} /><div className="space-y-4 mt-4">{userSymptoms.filter(e => e.userId === user.id).map((e, i) => <div key={i} className="border p-4 rounded-lg"><h3 className="font-medium">{e.date}</h3>{Object.entries(e.symptoms).map(([n, v]) => <p key={n} className="text-sm">{n}: {v}/10</p>)}</div>)}</div></>}
                 </div>
             );
         };
 
         const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
+        window.renderApp = () => root.render(<App />);
+        if (window.firebaseReady) window.renderApp();
+        else window.addEventListener('firebaseReady', window.renderApp);
     </script>
 </body>
 </html>
